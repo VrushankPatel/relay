@@ -1,0 +1,449 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Initialize TypeScript Node.js project with build tooling": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323445
+      },
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366331319
+      }
+    ],
+    "1.2 Define core TypeScript interfaces and types": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323449
+      },
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366332134
+      }
+    ],
+    "1.3 Create logging infrastructure with structured logging": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323453
+      },
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366332893
+      }
+    ],
+    "2.1 Implement API Gateway with Fastify": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323456
+      },
+      {
+        "executionId": "22548d60-7a12-4642-90f6-d6dcda6085de",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782371748714
+      }
+    ],
+    "2.2 Implement authentication middleware": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323468
+      },
+      {
+        "executionId": "aed55d59-d9cf-438c-80f1-cdfa71408446",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782372014905
+      }
+    ],
+    "3.1 Implement Request Processor for context extraction": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323472
+      },
+      {
+        "executionId": "22548d60-7a12-4642-90f6-d6dcda6085de",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782371749488
+      }
+    ],
+    "3.2 Implement context normalization": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323475
+      },
+      {
+        "executionId": "22548d60-7a12-4642-90f6-d6dcda6085de",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782371750280
+      }
+    ],
+    "3.3 Implement context hash generation": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323479
+      },
+      {
+        "executionId": "aed55d59-d9cf-438c-80f1-cdfa71408446",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782372015639
+      }
+    ],
+    "4.1 Implement in-memory cache storage with LRU": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323483
+      },
+      {
+        "executionId": "aed55d59-d9cf-438c-80f1-cdfa71408446",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782372016511
+      }
+    ],
+    "4.2 Implement exact cache lookup": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323487
+      }
+    ],
+    "4.3 Implement LRU eviction policy": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323490
+      }
+    ],
+    "4.4 Implement cache invalidation": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323493
+      }
+    ],
+    "5.1 Integrate tiktoken library for token counting": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323496
+      }
+    ],
+    "5.2 Implement token savings calculation": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323499
+      }
+    ],
+    "5.3 Implement token budget tracking": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323502
+      }
+    ],
+    "6.1 Implement deduplication manager for in-flight requests": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323505
+      }
+    ],
+    "6.2 Implement request completion and error handling": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323508
+      }
+    ],
+    "6.3 Implement similarity matching with Levenshtein distance": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323511
+      }
+    ],
+    "7.1 Implement Request Forwarder with undici connection pool": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323514
+      }
+    ],
+    "7.2 Implement error handling and retry logic": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323518
+      }
+    ],
+    "7.3 Implement connection pool statistics": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323521
+      }
+    ],
+    "8.1 Implement response compression with gzip": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323524
+      }
+    ],
+    "8.2 Implement response decompression": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323527
+      }
+    ],
+    "8.3 Implement completion deduplication": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323530
+      }
+    ],
+    "9.1 Implement Metrics Collector with prom-client": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323533
+      }
+    ],
+    "9.2 Implement metrics recording methods": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323537
+      }
+    ],
+    "9.3 Implement metrics aggregation and export": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323539
+      }
+    ],
+    "9.4 Implement metrics retention": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323543
+      }
+    ],
+    "10.1 Implement Configuration Manager with YAML parsing": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323545
+      }
+    ],
+    "10.2 Implement configuration validation": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323549
+      }
+    ],
+    "10.3 Implement hot-reload with file watching": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323552
+      }
+    ],
+    "10.4 Implement configuration fallback on invalid config": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323556
+      }
+    ],
+    "11.1 Implement Health Monitor": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323559
+      }
+    ],
+    "11.2 Implement health check endpoint": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323563
+      }
+    ],
+    "11.3 Implement diagnostics endpoint": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323566
+      }
+    ],
+    "11.4 Implement component restart mechanism": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323569
+      }
+    ],
+    "12.1 Implement cache encryption with AES-256": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323572
+      }
+    ],
+    "13.1 Implement comprehensive error handling": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323575
+      }
+    ],
+    "13.2 Implement graceful degradation for component failures": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323578
+      }
+    ],
+    "13.3 Implement API unavailability fallback": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323581
+      }
+    ],
+    "13.4 Implement timeout handling": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323585
+      }
+    ],
+    "14.1 Wire all components together in main application": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323588
+      }
+    ],
+    "14.2 Implement complete request flow": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323591
+      }
+    ],
+    "15.1 Run all unit tests and verify they pass": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323594
+      }
+    ],
+    "15.2 Run all property-based tests and verify they pass": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323597
+      }
+    ],
+    "15.3 Run all integration tests and verify they pass": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323602
+      }
+    ],
+    "15.4 Manual testing checkpoint": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323608
+      }
+    ],
+    "16.1 Create deployment configuration files": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323613
+      }
+    ],
+    "16.2 Create systemd service file for VM deployment": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323620
+      }
+    ],
+    "16.3 Create Kubernetes deployment manifests": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323631
+      }
+    ],
+    "16.4 Update README with comprehensive documentation": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323634
+      }
+    ],
+    "16.5 Create operational runbooks": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323637
+      }
+    ],
+    "19.1 Run complete test suite": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323640
+      }
+    ],
+    "19.2 Security audit": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323644
+      }
+    ],
+    "19.3 Build and test Docker image": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323648
+      }
+    ],
+    "19.4 Prepare release artifacts": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323651
+      }
+    ],
+    "19.5 Final checkpoint - production readiness review": [
+      {
+        "executionId": "f698fc6d-093c-4422-9a9b-dabe18713fc1",
+        "chatSessionId": "fa5a335d-8cf3-4d06-bf75-0125866d3092",
+        "timestamp": 1782366323654
+      }
+    ]
+  }
+}

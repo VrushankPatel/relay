@@ -1,0 +1,71 @@
+# Example configuration for GitHub Copilot Token Optimizer Proxy
+# Copy this file to config.yaml and adjust values as needed
+
+server:
+  # Port to listen on
+  port: 8080
+  
+  # Host to bind to (0.0.0.0 for all interfaces)
+  host: '0.0.0.0'
+  
+  # Maximum concurrent requests
+  maxConcurrentRequests: 100
+  
+  # Request timeout in milliseconds
+  requestTimeoutMs: 5000
+
+cache:
+  # Cache TTL in hours
+  ttlHours: 24
+  
+  # Maximum number of cache entries
+  maxEntries: 10000
+  
+  # Enable gzip compression for cached responses
+  compressionEnabled: true
+  
+  # Optional Redis URL for persistent cache (null for in-memory only)
+  redisUrl: null
+
+tokens:
+  # Optional daily token budget per user (null for unlimited)
+  budgetPerUserPerDay: null
+  
+  # Enable token tracking
+  trackingEnabled: true
+  
+  # Warn when user reaches this percentage of budget
+  warningThresholdPercent: 90
+
+similarity:
+  # Enable fuzzy cache matching
+  enabled: true
+  
+  # Minimum similarity percentage for fuzzy matches
+  threshold: 85
+  
+  # Maximum number of entries to search for similarity
+  maxSearchEntries: 100
+
+security:
+  # Require API key authentication
+  apiKeyRequired: true
+  
+  # Encrypt cached data at rest
+  encryptCache: true
+  
+  # Only allow HTTPS for GitHub Copilot API
+  httpsOnly: true
+  
+  # API key for client authentication (set via environment variable in production)
+  # apiKey: 'your-secret-api-key-here'
+  
+  # Encryption secret for cache encryption (set via environment variable in production)
+  # encryptionSecret: 'your-encryption-secret-here'
+
+logging:
+  # Log level: DEBUG, INFO, WARN, ERROR
+  level: 'INFO'
+  
+  # Pretty print logs (disable in production)
+  prettyPrint: true
