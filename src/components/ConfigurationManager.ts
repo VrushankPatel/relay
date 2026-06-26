@@ -40,11 +40,14 @@ export interface IConfigurationManager {
   loadConfig(filePath?: string): Promise<Configuration>;
   getCurrentConfig(): Configuration;
   validateConfig(config: Configuration): string[];
+  watchConfig(callback: (config: Configuration) => void): void;
 }
 
 export class ConfigurationManager implements IConfigurationManager {
   private currentConfig: Configuration;
   private logger: ReturnType<typeof createChildLogger>;
+  private configPath: string = 'config.yaml';
+  private watchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(config?: Partial<Configuration>) {
     this.logger = createChildLogger('ConfigurationManager');
@@ -53,6 +56,7 @@ export class ConfigurationManager implements IConfigurationManager {
 
   async loadConfig(filePath?: string): Promise<Configuration> {
     const path = filePath || process.env.CONFIG_PATH || 'config.yaml';
+    this.configPath = path;
 
     try {
       let yamlContent: string;
@@ -89,6 +93,47 @@ export class ConfigurationManager implements IConfigurationManager {
 
   getCurrentConfig(): Configuration {
     return this.currentConfig;
+  }
+
+  watchConfig(callback: (config: Configuration) => void): void {
+    if (!fs.existsSync(this.configPath)) {
+      this.logger.warn({ path: this.configPath }, 'Config file not found, not watching');
+      return;
+    }
+
+    fs.watchFile(this.configPath, { interval: 1000 }, (curr, prev) => {
+      if (curr.mtimeMs === prev.mtimeMs) return;
+
+      if (this.watchTimeout) clearTimeout(this.watchTimeout);
+      this.watchTimeout = setTimeout(async () => {
+        this.logger.info({ path: this.configPath }, 'Config file changed, reloading');
+        const newConfig = await this._reloadConfig();
+        const errors = this.validateConfig(newConfig);
+        if (errors.length > 0) {
+          this.logger.error({ errors }, 'Config validation failed, keeping previous config');
+          return;
+        }
+        this.currentConfig = newConfig;
+        this.logger.info({ path: this.configPath }, 'Config hot-reload applied');
+        callback(this.currentConfig);
+      }, 1000);
+    });
+    this.logger.info({ path: this.configPath }, 'Watching config file for changes');
+  }
+
+  private async _reloadConfig(): Promise<Configuration> {
+    try {
+      const yamlContent = fs.readFileSync(this.configPath, 'utf8');
+      const jsYaml = await import('js-yaml');
+      const parsed = jsYaml.load(yamlContent) as Record<string, any>;
+      if (!parsed || typeof parsed !== 'object') {
+        return this.currentConfig;
+      }
+      return this.mergeConfig(parsed);
+    } catch (error) {
+      this.logger.error({ error }, 'Error reloading config');
+      return this.currentConfig;
+    }
   }
 
   validateConfig(config: Configuration): string[] {

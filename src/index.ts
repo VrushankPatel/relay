@@ -119,32 +119,65 @@ async function main(): Promise<void> {
       };
     };
 
+    const safeCacheLookup = async (hash: string) => {
+      try { return await cacheManager.lookupExact(hash); }
+      catch (e) { log.error({ error: e }, 'Cache lookup failed, degrading'); return null; }
+    };
+    const safeCacheSimilar = async (hash: string, threshold: number) => {
+      try { return await cacheManager.lookupSimilar(hash, threshold); }
+      catch (e) { log.error({ error: e }, 'Similarity lookup failed, degrading'); return null; }
+    };
+    const safeCacheStore = async (hash: string, resp: CopilotResponse, uid: string) => {
+      try { await cacheManager.store(hash, resp, uid); }
+      catch (e) { log.error({ error: e }, 'Cache store failed'); }
+    };
+    const safeTokenCount = (completions: any[]) => {
+      try { return tokenAnalyzer.countResponseTokens(completions); }
+      catch { return 0; }
+    };
+    const safeTokenConsume = (uid: string, tokens: number, fromCache: boolean) => {
+      try { tokenAnalyzer.recordConsumption(uid, tokens, fromCache); }
+      catch { /* skip token tracking on failure */ }
+    };
+    const safeBudgetCheck = (uid: string) => {
+      try { return tokenAnalyzer.checkBudget(uid); }
+      catch { return { withinBudget: true, consumed: 0, limit: undefined, remaining: Infinity, percentUsed: 0 } as any; }
+    };
+    const safeMetricsTokens = (consumed: number, saved: number) => {
+      try { metricsCollector.recordTokens(consumed, saved); }
+      catch { /* skip metrics on failure */ }
+    };
+    const safeMetricsError = (type: string) => {
+      try { metricsCollector.recordError(type); }
+      catch { /* skip metrics on failure */ }
+    };
+
     try {
       const context = requestProcessor.extractContext(body);
       const normalized = requestProcessor.normalizeContext(context);
       const contextHash = requestProcessor.generateContextHash(normalized);
       log.debug({ contextHash: contextHash.substring(0, 16) }, 'Context hash generated');
 
-      const exactMatch = await cacheManager.lookupExact(contextHash);
+      const exactMatch = await safeCacheLookup(contextHash);
       if (exactMatch) {
         const responseData = JSON.parse(exactMatch.response.data.toString('utf8')) as CopilotResponse;
         if (responseData.completions) {
-          const tokens = tokenAnalyzer.countResponseTokens(responseData.completions);
-          tokenAnalyzer.recordConsumption(req.authResult.userId, tokens, true);
-          metricsCollector.recordTokens(0, tokens);
+          const tokens = safeTokenCount(responseData.completions);
+          safeTokenConsume(req.authResult.userId, tokens, true);
+          safeMetricsTokens(0, tokens);
         }
         log.info('Cache hit (exact)');
         return sendResponse(200, responseData, true);
       }
 
       if (config.similarity.enabled) {
-        const similarMatch = await cacheManager.lookupSimilar(contextHash, config.similarity.threshold);
+        const similarMatch = await safeCacheSimilar(contextHash, config.similarity.threshold);
         if (similarMatch) {
           const responseData = JSON.parse(similarMatch.response.data.toString('utf8')) as CopilotResponse;
           if (responseData.completions) {
-            const tokens = tokenAnalyzer.countResponseTokens(responseData.completions);
-            tokenAnalyzer.recordConsumption(req.authResult.userId, tokens, true);
-            metricsCollector.recordTokens(0, tokens);
+            const tokens = safeTokenCount(responseData.completions);
+            safeTokenConsume(req.authResult.userId, tokens, true);
+            safeMetricsTokens(0, tokens);
           }
           log.info('Cache hit (fuzzy)');
           return sendResponse(200, responseData, true);
@@ -155,16 +188,16 @@ async function main(): Promise<void> {
         log.info('Deduplicated request');
         const dedupResponse = await dedupManager.waitForCompletion(contextHash);
         if (dedupResponse.completions) {
-          const tokens = tokenAnalyzer.countResponseTokens(dedupResponse.completions);
-          metricsCollector.recordTokens(0, tokens);
+          const tokens = safeTokenCount(dedupResponse.completions);
+          safeMetricsTokens(0, tokens);
         }
         return sendResponse(200, dedupResponse, true);
       }
 
       const requestTokens = tokenAnalyzer.countRequestTokens(body.prompt);
-      const budgetStatus = tokenAnalyzer.checkBudget(req.authResult.userId);
+      const budgetStatus = safeBudgetCheck(req.authResult.userId);
       if (!budgetStatus.withinBudget) {
-        metricsCollector.recordError('BUDGET_EXCEEDED');
+        safeMetricsError('BUDGET_EXCEEDED');
         return sendResponse(429, {
           error: 'Token budget exceeded',
           code: 'BUDGET_EXCEEDED',
@@ -186,29 +219,39 @@ async function main(): Promise<void> {
           req.authResult.copilotToken,
         );
 
-        const responseTokens = tokenAnalyzer.countResponseTokens(copilotResponse.completions || []);
-        tokenAnalyzer.recordConsumption(req.authResult.userId, requestTokens + responseTokens, false);
-        metricsCollector.recordTokens(requestTokens + responseTokens, 0);
+        const responseTokens = safeTokenCount(copilotResponse.completions || []);
+        safeTokenConsume(req.authResult.userId, requestTokens + responseTokens, false);
+        safeMetricsTokens(requestTokens + responseTokens, 0);
 
-        await cacheManager.store(contextHash, copilotResponse, req.authResult.userId);
+        await safeCacheStore(contextHash, copilotResponse, req.authResult.userId);
         dedupManager.completeRequest(contextHash, copilotResponse);
 
         log.info('Cache miss - forwarded to Copilot');
         return sendResponse(200, copilotResponse, false);
       } catch (forwardError) {
         dedupManager.failRequest(contextHash, forwardError instanceof Error ? forwardError : new Error(String(forwardError)));
-        metricsCollector.recordError('FORWARD_FAILURE');
+        safeMetricsError('FORWARD_FAILURE');
         throw forwardError;
       }
     } catch (error) {
       log.error({ error }, 'Error processing request');
-      metricsCollector.recordError('INTERNAL_ERROR');
+      safeMetricsError('INTERNAL_ERROR');
+      metricsCollector.recordRequest(500, false, Date.now() - startTime, req.authResult.userId);
       return {
         statusCode: 500,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ error: 'Internal server error', code: 'INTERNAL_ERROR' }),
       };
     }
+  });
+
+  configManager.watchConfig((newConfig) => {
+    Object.assign(config, newConfig);
+    logger.info({ changes: newConfig }, 'Configuration updated via hot-reload');
+    initializeLogger({
+      level: config.logging.level.toLowerCase() as any,
+      prettyPrint: config.logging.prettyPrint,
+    });
   });
 
   await gateway.start(config.server.host, config.server.port);
