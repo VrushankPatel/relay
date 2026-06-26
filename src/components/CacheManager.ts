@@ -7,6 +7,11 @@
 
 import { CacheEntry, CompressedResponse, CacheStatistics } from '../types/cache';
 import { CopilotResponse } from '../types/copilot';
+import zlib from 'zlib';
+import { promisify } from 'util';
+
+const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
 
 /**
  * Cache Manager interface defining cache storage and retrieval operations.
@@ -138,7 +143,16 @@ export class CacheManager implements ICacheManager {
     this.moveToFront(contextHash);
     
     this.totalHits++;
-    return entry;
+    
+    // Decompress the response data before returning
+    const decompressedData = await gunzip(entry.response.data);
+    return {
+      ...entry,
+      response: {
+        ...entry.response,
+        data: decompressedData,
+      },
+    };
   }
   
   /**
@@ -177,11 +191,21 @@ export class CacheManager implements ICacheManager {
       this.moveToFront(bestMatch.contextHash);
       
       this.totalHits++;
-    } else {
-      this.totalMisses++;
+
+      // Decompress the response data before returning
+      const decompressedData = await gunzip(bestMatch.response.data);
+      return {
+        ...bestMatch,
+        response: {
+          ...bestMatch.response,
+          data: decompressedData,
+        },
+      };
     }
     
-    return bestMatch;
+    this.totalMisses++;
+    
+    return null;
   }
   
   /**
@@ -194,15 +218,15 @@ export class CacheManager implements ICacheManager {
       await this.evictLRU(1);
     }
     
-    // Create compressed response (placeholder - compression not implemented yet)
+    // Compress response with gzip
     const responseJson = JSON.stringify(response);
     const originalSize = Buffer.byteLength(responseJson, 'utf8');
-    const data = Buffer.from(responseJson, 'utf8');
+    const compressed = await gzip(responseJson, { level: 6 });
     
     const compressedResponse: CompressedResponse = {
-      data,
+      data: compressed,
       originalSize,
-      compressedSize: data.length,
+      compressedSize: compressed.length,
     };
     
     // Create cache entry
