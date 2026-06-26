@@ -26,6 +26,11 @@ export interface HTTPResponse {
 export type RequestHandler = (req: AuthenticatedRequest) => Promise<HTTPResponse>;
 
 /**
+ * Route handler for non-completion endpoints (health, metrics, etc).
+ */
+export type RouteHandler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
+
+/**
  * API Gateway interface defining the contract for handling HTTP requests.
  */
 export interface APIGateway {
@@ -83,6 +88,7 @@ export class APIGatewayImpl implements APIGateway {
   private readonly maxConcurrentRequests: number;
   private readonly requestTimeoutMs: number;
   private authenticator: ((apiKey: string, copilotToken: string) => Promise<AuthResult>) | null = null;
+  private routes: Map<string, RouteHandler> = new Map();
 
   /**
    * Creates a new API Gateway instance.
@@ -100,6 +106,14 @@ export class APIGatewayImpl implements APIGateway {
    */
   setRequestHandler(handler: RequestHandler): void {
     this.requestHandler = handler;
+  }
+
+  /**
+   * Register a handler for a specific HTTP method + path.
+   */
+  registerRoute(method: string, path: string, handler: RouteHandler): void {
+    const key = `${method.toUpperCase()}:${path}`;
+    this.routes.set(key, handler);
   }
 
   /**
@@ -203,6 +217,17 @@ export class APIGatewayImpl implements APIGateway {
       }, this.requestTimeoutMs);
 
       try {
+        // Check custom routes first (health, metrics, etc.)
+        if (req.method && req.url) {
+          const routeKey = `${req.method.toUpperCase()}:${req.url}`;
+          const routeHandler = this.routes.get(routeKey);
+          if (routeHandler) {
+            clearTimeout(timeoutId);
+            await routeHandler(req, res);
+            return;
+          }
+        }
+
         // Only handle POST /v1/completions
         if (req.method !== 'POST' || req.url !== '/v1/completions') {
           clearTimeout(timeoutId);
