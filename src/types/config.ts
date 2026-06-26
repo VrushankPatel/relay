@@ -23,6 +23,20 @@ export interface Configuration {
   
   /** Security and authentication configuration */
   security: SecurityConfig;
+
+  /** Logging configuration */
+  logging: LoggingConfig;
+}
+
+/**
+ * Logging configuration.
+ */
+export interface LoggingConfig {
+  /** Log level: DEBUG, INFO, WARN, ERROR */
+  level: string;
+
+  /** Whether to pretty-print logs (disable in production) */
+  prettyPrint: boolean;
 }
 
 /**

@@ -21,14 +21,13 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * Sensitive field patterns to redact from logs
  */
 const SENSITIVE_PATTERNS = [
-  /api[_-]?key/i,
-  /auth[_-]?token/i,
-  /bearer/i,
-  /password/i,
-  /secret/i,
-  /token/i,
-  /copilot[_-]?token/i,
-  /authorization/i,
+  /\bapi[_-]?key\b/i,
+  /\bauth[_-]?token\b/i,
+  /\bbearer\b/i,
+  /\bpassword\b/i,
+  /\bsecret\b/i,
+  /\bcopilot[_-]?token\b/i,
+  /\bauthorization\b/i,
 ];
 
 /**
@@ -324,6 +323,11 @@ export function completeRequestTracking(
     'Request completed'
   );
 }
+
+/**
+ * Pre-initialized logger instance for components that need a quick reference.
+ */
+export const logger = getLogger();
 
 // Initialize logger on module load with defaults
 initializeLogger();

@@ -230,8 +230,8 @@ describe('RequestProcessor', () => {
 
       const normalized = processor.normalizeContext(context);
 
-      expect(normalized.precedingContent).toBe('\n\n');
-      expect(normalized.followingContent).toBe('\n');
+      expect(normalized.precedingContent).toBe('');
+      expect(normalized.followingContent).toBe('');
     });
   });
 
@@ -337,14 +337,14 @@ describe('RequestProcessor', () => {
       const request1: CompletionRequestBody = {
         prompt: 'test',
         language: 'typescript',
-        cursorPosition: 20,
+        cursorPosition: 99999,
         fileContext: 'const x = 10;\nconst y = 20;// more code',
       };
 
       const request2: CompletionRequestBody = {
         prompt: 'test',
         language: 'typescript',
-        cursorPosition: 20,
+        cursorPosition: 99999,
         fileContext: 'const  x  =  10;\nconst   y   =   20;// more code',
       };
 

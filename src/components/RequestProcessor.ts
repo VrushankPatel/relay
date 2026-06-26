@@ -147,7 +147,12 @@ export class RequestProcessor implements IRequestProcessor {
       return leading + normalizedContent;
     });
     
-    // Step 4: Join lines back together
+    // Step 4: Remove trailing empty lines
+    while (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1].trim() === '') {
+      normalizedLines.pop();
+    }
+    
+    // Step 5: Join lines back together
     return normalizedLines.join('\n');
   }
   

@@ -40,6 +40,7 @@ export type {
   TokenConfig,
   SimilarityConfig,
   SecurityConfig,
+  LoggingConfig,
 } from './config.js';
 
 // Metrics types
