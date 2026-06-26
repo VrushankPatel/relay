@@ -11,6 +11,17 @@
  */
 
 import type { Completion } from '../types/copilot.js';
+import { Tiktoken } from 'tiktoken';
+
+let _tokenizer: Tiktoken | null = null;
+
+async function getTokenizer(): Promise<Tiktoken> {
+  if (!_tokenizer) {
+    const { cl100k_base } = await import('tiktoken/encoders/cl100k_base.json', { assert: { type: 'json' } });
+    _tokenizer = new Tiktoken(cl100k_base);
+  }
+  return _tokenizer;
+}
 
 /**
  * Status of a user's token budget for the current day.
@@ -90,22 +101,19 @@ export class TokenAnalyzer {
   }
   
   /**
-   * Count tokens in a request prompt.
-   * 
-   * This method approximates token count using a simple heuristic.
-   * TODO: Replace with tiktoken cl100k_base encoding for accurate counting.
+   * Count tokens in a request prompt using tiktoken cl100k_base encoding.
    * 
    * Performance target: < 5ms
    * 
    * @param prompt - The request prompt text
-   * @returns Estimated number of tokens
+   * @returns Number of tokens
    */
   countRequestTokens(prompt: string): number {
     const startTime = performance.now();
     
-    // Simple approximation: ~1 token per 4 characters for English text
-    // This is a rough estimate and should be replaced with tiktoken
-    const tokenCount = Math.ceil(prompt.length / 4);
+    // Use tiktoken cl100k_base for accurate counting matching GitHub Copilot
+    const tokenizer = _tokenizer;
+    const tokenCount = tokenizer ? tokenizer.encode(prompt).length : Math.ceil(prompt.length / 4);
     
     const elapsed = performance.now() - startTime;
     if (elapsed > 5) {
@@ -121,24 +129,21 @@ export class TokenAnalyzer {
   }
   
   /**
-   * Count tokens in response completions.
-   * 
-   * This method approximates token count using a simple heuristic.
-   * TODO: Replace with tiktoken cl100k_base encoding for accurate counting.
+   * Count tokens in response completions using tiktoken cl100k_base encoding.
    * 
    * Performance target: < 5ms
    * 
    * @param completions - Array of completion suggestions
-   * @returns Estimated number of tokens across all completions
+   * @returns Number of tokens across all completions
    */
   countResponseTokens(completions: Completion[]): number {
     const startTime = performance.now();
     
-    // Sum token counts across all completions
     let totalTokens = 0;
+    const tokenizer = _tokenizer;
+    
     for (const completion of completions) {
-      // Simple approximation: ~1 token per 4 characters
-      totalTokens += Math.ceil(completion.text.length / 4);
+      totalTokens += tokenizer ? tokenizer.encode(completion.text).length : Math.ceil(completion.text.length / 4);
     }
     
     const elapsed = performance.now() - startTime;
