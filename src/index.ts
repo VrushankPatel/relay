@@ -5,43 +5,11 @@ import { RequestProcessor } from './components/RequestProcessor.js';
 import { CacheManager } from './components/CacheManager.js';
 import { DeduplicationManager } from './components/DeduplicationManager.js';
 import { TokenAnalyzer } from './components/TokenAnalyzer.js';
+import { RequestForwarder } from './components/RequestForwarder.js';
 import { APIGatewayImpl } from './components/APIGateway.js';
 import type { HTTPResponse } from './components/APIGateway.js';
 import type { AuthenticatedRequest } from './types/requests.js';
 import type { CopilotResponse } from './types/copilot.js';
-import https from 'https';
-
-async function forwardToCopilot(
-  body: Record<string, unknown>,
-  copilotToken: string,
-): Promise<CopilotResponse> {
-  const url = new URL('https://api.githubcopilot.com/v1/completions');
-  return new Promise((resolve, reject) => {
-    const options: https.RequestOptions = {
-      hostname: url.hostname,
-      port: 443,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(copilotToken ? { Authorization: `Bearer ${copilotToken}` } : {}),
-      },
-      timeout: 30000,
-    };
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch { reject(new Error(`Copilot API returned non-JSON: ${data.substring(0, 200)}`)); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Copilot API request timed out')); });
-    req.write(JSON.stringify(body));
-    req.end();
-  });
-}
 
 async function main(): Promise<void> {
   const configManager = new ConfigurationManager();
@@ -67,6 +35,8 @@ async function main(): Promise<void> {
     config.tokens.budgetPerUserPerDay,
     createChildLogger('TokenAnalyzer'),
   );
+
+  const requestForwarder = new RequestForwarder();
 
   const gateway = new APIGatewayImpl(
     config.server.maxConcurrentRequests,
@@ -147,7 +117,7 @@ async function main(): Promise<void> {
       await dedupManager.registerRequest(contextHash);
 
       try {
-        const copilotResponse = await forwardToCopilot(
+        const copilotResponse = await requestForwarder.forward(
           {
             prompt: body.prompt,
             language: body.language,
