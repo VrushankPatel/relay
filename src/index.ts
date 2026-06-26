@@ -37,7 +37,8 @@ async function main(): Promise<void> {
   });
 
   const requestProcessor = new RequestProcessor();
-  const cacheManager = new CacheManager(config.cache.maxEntries, config.cache.ttlHours);
+  const encryptionSecret = config.security.encryptCache ? (process.env.ENCRYPTION_SECRET || undefined) : undefined;
+  const cacheManager = new CacheManager(config.cache.maxEntries, config.cache.ttlHours, encryptionSecret);
   const dedupManager = new DeduplicationManager();
   const tokenAnalyzer = new TokenAnalyzer(
     config.tokens.budgetPerUserPerDay,

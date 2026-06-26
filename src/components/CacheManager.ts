@@ -7,11 +7,39 @@
 
 import { CacheEntry, CompressedResponse, CacheStatistics } from '../types/cache';
 import { CopilotResponse } from '../types/copilot';
+import crypto from 'crypto';
 import zlib from 'zlib';
 import { promisify } from 'util';
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
+
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+const IV_LENGTH = 12;
+const AUTH_TAG_LENGTH = 16;
+const KEY_ITERATIONS = 100000;
+const KEY_LENGTH = 32;
+
+function deriveKey(secret: string): Buffer {
+  return crypto.pbkdf2Sync(secret, 'copilot-proxy-salt', KEY_ITERATIONS, KEY_LENGTH, 'sha256');
+}
+
+function encrypt(buffer: Buffer, key: Buffer): Buffer {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]);
+}
+
+function decrypt(buffer: Buffer, key: Buffer): Buffer {
+  const iv = buffer.subarray(0, IV_LENGTH);
+  const authTag = buffer.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
+  const ciphertext = buffer.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
+  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
 
 /**
  * Cache Manager interface defining cache storage and retrieval operations.
@@ -92,6 +120,7 @@ export class CacheManager implements ICacheManager {
   private cache: Map<string, CacheEntry>;
   private maxEntries: number;
   private ttlMilliseconds: number;
+  private encryptionKey: Buffer | null = null;
   
   // LRU tracking with doubly-linked list
   private lruHead: LRUNode | null = null;
@@ -106,12 +135,16 @@ export class CacheManager implements ICacheManager {
    * Create a new Cache Manager.
    * @param maxEntries Maximum number of cache entries (default: 10,000)
    * @param ttlHours Cache TTL in hours (default: 24)
+   * @param encryptionSecret Optional secret for AES-256-GCM encryption at rest
    */
-  constructor(maxEntries = 10000, ttlHours = 24) {
+  constructor(maxEntries = 10000, ttlHours = 24, encryptionSecret?: string) {
     this.cache = new Map();
     this.lruMap = new Map();
     this.maxEntries = maxEntries;
     this.ttlMilliseconds = ttlHours * 60 * 60 * 1000;
+    if (encryptionSecret) {
+      this.encryptionKey = deriveKey(encryptionSecret);
+    }
   }
   
   /**
@@ -144,8 +177,9 @@ export class CacheManager implements ICacheManager {
     
     this.totalHits++;
     
-    // Decompress the response data before returning
-    const decompressedData = await gunzip(entry.response.data);
+    // Decrypt if encrypted, then decompress
+    const rawData = this.encryptionKey ? decrypt(entry.response.data, this.encryptionKey) : entry.response.data;
+    const decompressedData = await gunzip(rawData);
     return {
       ...entry,
       response: {
@@ -192,8 +226,9 @@ export class CacheManager implements ICacheManager {
       
       this.totalHits++;
 
-      // Decompress the response data before returning
-      const decompressedData = await gunzip(bestMatch.response.data);
+      // Decrypt if encrypted, then decompress
+      const rawData = this.encryptionKey ? decrypt(bestMatch.response.data, this.encryptionKey) : bestMatch.response.data;
+      const decompressedData = await gunzip(rawData);
       return {
         ...bestMatch,
         response: {
@@ -223,10 +258,13 @@ export class CacheManager implements ICacheManager {
     const originalSize = Buffer.byteLength(responseJson, 'utf8');
     const compressed = await gzip(responseJson, { level: 6 });
     
+    // Optionally encrypt the compressed data
+    const stored = this.encryptionKey ? encrypt(compressed, this.encryptionKey) : compressed;
+    
     const compressedResponse: CompressedResponse = {
-      data: compressed,
+      data: stored,
       originalSize,
-      compressedSize: compressed.length,
+      compressedSize: stored.length,
     };
     
     // Create cache entry
