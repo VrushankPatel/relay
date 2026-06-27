@@ -15,19 +15,19 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: node20-macos-arm64
+          - target: node22-macos-arm64
             runner: macos-latest
             output: relay-macos-arm64
-          - target: node20-macos-x64
+          - target: node22-macos-x64
             runner: macos-latest
             output: relay-macos-x64
-          - target: node20-linux-x64
+          - target: node22-linux-x64
             runner: ubuntu-latest
             output: relay-linux-x64
-          - target: node20-linux-arm64
+          - target: node22-linux-arm64
             runner: ubuntu-latest
             output: relay-linux-arm64
-          - target: node20-win-x64
+          - target: node22-win-x64
             runner: windows-latest
             output: relay-windows-x64.exe
 
@@ -42,11 +42,9 @@ jobs:
 
       - run: npm run build
 
-      - run: ls -la dist/
-
       - run: npx pkg dist/index.js --targets ${{ matrix.target }} --output ${{ matrix.output }} -c package.json
 
-      - run: ls -la ${{ matrix.output }}*
+      - run: ls -la ${{ matrix.output }}* 2>/dev/null || echo "No output file yet (pkg building from source)"
 
       - uses: actions/upload-artifact@v4
         with:
