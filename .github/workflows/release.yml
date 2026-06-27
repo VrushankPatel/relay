@@ -60,20 +60,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: Compute checksums
         run: |
           cd artifacts
-          for f in relay-* relay-*.exe; do
-            if [ -f "$f" ]; then
-              sha256sum "$f" >> checksums.txt
-            fi
-          done
+          sha256sum relay-* relay-*.exe 2>/dev/null | tee checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Relay ${{ github.ref_name }}
+          fail_on_unmatched_files: false
           body: |
             ## Relay ${{ github.ref_name }}
 
