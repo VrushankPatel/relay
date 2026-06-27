@@ -68,9 +68,6 @@ export interface CacheConfig {
   
   /** Whether to enable gzip compression for cached responses */
   compressionEnabled: boolean;
-  
-  /** Optional Redis connection URL for persistent cache storage */
-  redisUrl?: string;
 }
 
 /**
@@ -79,9 +76,6 @@ export interface CacheConfig {
 export interface TokenConfig {
   /** Optional daily token budget per user (undefined means unlimited) */
   budgetPerUserPerDay?: number;
-  
-  /** Whether to enable token consumption tracking */
-  trackingEnabled: boolean;
   
   /** Percentage of budget at which to log a warning (0-100) */
   warningThresholdPercent: number;
@@ -105,12 +99,6 @@ export interface SimilarityConfig {
  * Security, authentication, and encryption configuration.
  */
 export interface SecurityConfig {
-  /** Whether to require API key authentication for incoming requests */
-  apiKeyRequired: boolean;
-  
   /** Whether to encrypt cached data at rest using AES-256 */
   encryptCache: boolean;
-  
-  /** Whether to enforce HTTPS-only communication with GitHub Copilot API */
-  httpsOnly: boolean;
 }

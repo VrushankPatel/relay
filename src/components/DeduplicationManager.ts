@@ -9,6 +9,9 @@ import { CopilotResponse } from '../types/copilot.js';
 import { createChildLogger } from '../utils/logger.js';
 import type { Logger } from 'pino';
 
+const DEFAULT_COALESCE_WINDOW_MS = 1000;
+const CLEANUP_DELAY_MS = 100;
+
 /**
  * In-flight request tracking entry.
  */
@@ -113,7 +116,7 @@ export class DeduplicationManager implements IDeduplicationManager {
    * Create a new Deduplication Manager.
    * @param coalesceWindowMs Time window for coalescing duplicate requests in milliseconds (default: 1000ms)
    */
-  constructor(coalesceWindowMs = 1000) {
+  constructor(coalesceWindowMs = DEFAULT_COALESCE_WINDOW_MS) {
     this.inFlightRequests = new Map();
     this.coalesceWindowMs = coalesceWindowMs;
     this.logger = createChildLogger('DeduplicationManager');
@@ -286,7 +289,7 @@ export class DeduplicationManager implements IDeduplicationManager {
     setTimeout(() => {
       this.inFlightRequests.delete(contextHash);
       this.logger.debug({ contextHash }, 'Cleaned up completed request');
-    }, 100);
+    }, CLEANUP_DELAY_MS);
   }
   
   /**
@@ -320,34 +323,24 @@ export class DeduplicationManager implements IDeduplicationManager {
       const nextWaiter = inFlight.waiters.shift();
       
       if (nextWaiter) {
-        // The next waiter will handle the request
-        // Reject the original primary promise
+        // The next waiter becomes the new primary.
+        // Reject the original primary promise first.
         if (inFlight.reject) {
           inFlight.reject(error);
         }
-        
+
         // Reset the in-flight request for the new primary
         inFlight.startTime = Date.now();
         inFlight.status = 'pending';
         delete inFlight.response;
         delete inFlight.error;
-        
-        // Create new promise for the new primary
-        let resolveFunc: ((response: CopilotResponse) => void) | undefined;
-        let rejectFunc: ((error: Error) => void) | undefined;
-        
-        inFlight.promise = new Promise<CopilotResponse>((resolve, reject) => {
-          resolveFunc = resolve;
-          rejectFunc = reject;
-        });
-        
-        inFlight.resolve = resolveFunc;
-        inFlight.reject = rejectFunc;
-        
-        // Notify the next waiter that it should proceed with the request
-        // by resolving with a special marker, or we could use a different mechanism
-        // For now, we keep the request in pending state and the caller should retry
-        
+
+        // Adopt the shifted waiter's resolve/reject so its promise becomes
+        // the new primary promise — no waiter is left dangling.
+        inFlight.resolve = nextWaiter.resolve;
+        inFlight.reject = nextWaiter.reject;
+        inFlight.promise = new Promise<CopilotResponse>(() => {});
+
         this.logger.debug(
           {
             contextHash,
@@ -356,7 +349,7 @@ export class DeduplicationManager implements IDeduplicationManager {
           },
           'New primary request established'
         );
-        
+
         return;
       }
     }

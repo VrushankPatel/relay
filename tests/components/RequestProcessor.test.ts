@@ -5,8 +5,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { RequestProcessor } from '../../src/components/RequestProcessor';
-import { CompletionRequestBody } from '../../src/types/requests';
+import { RequestProcessor } from '../../src/components/RequestProcessor.js';
+import { CompletionRequestBody } from '../../src/types/requests.js';
 
 describe('RequestProcessor', () => {
   const processor = new RequestProcessor();

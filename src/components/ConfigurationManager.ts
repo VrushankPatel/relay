@@ -13,11 +13,9 @@ const DEFAULT_CONFIG: Configuration = {
     ttlHours: 24,
     maxEntries: 10000,
     compressionEnabled: true,
-    redisUrl: undefined,
   },
   tokens: {
     budgetPerUserPerDay: undefined,
-    trackingEnabled: true,
     warningThresholdPercent: 90,
   },
   similarity: {
@@ -26,9 +24,7 @@ const DEFAULT_CONFIG: Configuration = {
     maxSearchEntries: 100,
   },
   security: {
-    apiKeyRequired: true,
     encryptCache: true,
-    httpsOnly: true,
   },
   logging: {
     level: 'INFO',
@@ -48,6 +44,7 @@ export class ConfigurationManager implements IConfigurationManager {
   private logger: ReturnType<typeof createChildLogger>;
   private configPath: string = 'config.yaml';
   private watchTimeout: ReturnType<typeof setTimeout> | null = null;
+  private watching = false;
 
   constructor(config?: Partial<Configuration>) {
     this.logger = createChildLogger('ConfigurationManager');
@@ -101,6 +98,8 @@ export class ConfigurationManager implements IConfigurationManager {
       return;
     }
 
+    this.watching = true;
+
     fs.watchFile(this.configPath, { interval: 1000 }, (curr, prev) => {
       if (curr.mtimeMs === prev.mtimeMs) return;
 
@@ -136,6 +135,14 @@ export class ConfigurationManager implements IConfigurationManager {
     }
   }
 
+  unwatchConfig(): void {
+    if (this.watching && fs.existsSync(this.configPath)) {
+      fs.unwatchFile(this.configPath);
+      this.watching = false;
+      this.logger.info({ path: this.configPath }, 'Stopped watching config file');
+    }
+  }
+
   validateConfig(config: Configuration): string[] {
     const errors: string[] = [];
 
@@ -162,6 +169,9 @@ export class ConfigurationManager implements IConfigurationManager {
     }
     if (config.similarity.maxSearchEntries < 1) {
       errors.push('similarity.maxSearchEntries must be >= 1');
+    }
+    if (config.logging.level && !['DEBUG', 'INFO', 'WARN', 'ERROR'].includes(config.logging.level.toUpperCase())) {
+      errors.push('logging.level must be one of: DEBUG, INFO, WARN, ERROR');
     }
 
     return errors;

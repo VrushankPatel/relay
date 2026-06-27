@@ -1,5 +1,8 @@
 import { createChildLogger } from '../utils/logger.js';
-import type { MetricsSummary, TimeRange } from '../types/metrics.js';
+import type { MetricsSummary } from '../types/metrics.js';
+
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const RETENTION_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface RequestRecord {
   status: number;
@@ -19,11 +22,19 @@ export class MetricsCollector {
   private totalLatency = 0;
   private errorsByType: Map<string, number> = new Map();
   private logger: ReturnType<typeof createChildLogger>;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.logger = createChildLogger('MetricsCollector');
 
-    setInterval(() => this.cleanup(), 24 * 60 * 60 * 1000);
+    this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
+  }
+
+  destroy(): void {
+    if (this.cleanupTimer !== null) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
   }
 
   recordRequest(status: number, cached: boolean, latency: number, userId: string): void {
@@ -104,7 +115,7 @@ export class MetricsCollector {
   }
 
   private cleanup(): void {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - RETENTION_PERIOD_MS;
     const before = this.requests.length;
     this.requests = this.requests.filter((r) => r.timestamp > cutoff);
     if (before !== this.requests.length) {

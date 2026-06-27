@@ -386,7 +386,12 @@ describe('Logger', () => {
       expect(mockChild.info).toHaveBeenCalledWith(context, 'Request started');
     });
 
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('should complete request tracking with status', () => {
+      vi.useFakeTimers();
       const logger = getLogger();
       const mockChild = { info: vi.fn() };
       (logger.child as any).mockReturnValue(mockChild);

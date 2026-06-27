@@ -1,10 +1,9 @@
-import { createChildLogger } from '../utils/logger.js';
 import type { HealthStatus, ComponentHealth, DiagnosticInfo, PoolStatistics } from '../types/health.js';
 import type { Configuration } from '../types/config.js';
 import type { CacheStatistics } from '../types/cache.js';
 import type { MetricsSummary } from '../types/metrics.js';
 
-const SERVICE_VERSION = '1.0.0';
+export const SERVICE_VERSION = '1.0.0';
 
 export interface ComponentCheck {
   name: string;
@@ -15,11 +14,9 @@ export class HealthMonitor {
   private startTime: number;
   private components: Map<string, ComponentHealth> = new Map();
   private checks: ComponentCheck[] = [];
-  private logger: ReturnType<typeof createChildLogger>;
 
   constructor() {
     this.startTime = Date.now();
-    this.logger = createChildLogger('HealthMonitor');
   }
 
   registerComponent(name: string, check: () => Promise<boolean>): void {

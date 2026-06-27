@@ -6,8 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { RequestProcessor } from '../../src/components/RequestProcessor';
-import { CompletionRequestBody } from '../../src/types/requests';
+import { RequestProcessor } from '../../src/components/RequestProcessor.js';
+import { CompletionRequestBody } from '../../src/types/requests.js';
 
 describe('RequestProcessor - Property-Based Tests', () => {
   const processor = new RequestProcessor();

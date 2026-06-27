@@ -10,7 +10,7 @@
 
 import crypto from 'crypto';
 import { AuthResult } from '../types/requests.js';
-import { logger } from '../utils/logger.js';
+import { getLogger } from '../utils/logger.js';
 
 /**
  * Configuration for the Authentication Manager.
@@ -68,7 +68,7 @@ export class AuthenticationManager implements IAuthenticationManager {
    */
   constructor(config: AuthenticationConfig) {
     this.apiKeys = new Map(config.apiKeys);
-    logger.info({ keyCount: this.apiKeys.size }, 'Authentication Manager initialized');
+    getLogger().info({ keyCount: this.apiKeys.size }, 'Authentication Manager initialized');
   }
   
   /**
@@ -85,7 +85,7 @@ export class AuthenticationManager implements IAuthenticationManager {
   async authenticate(apiKey: string, copilotToken: string): Promise<AuthResult> {
     // Check if API key is provided
     if (!apiKey || apiKey.trim() === '') {
-      logger.debug('Authentication failed: missing API key');
+      getLogger().debug('Authentication failed: missing API key');
       return {
         authenticated: false,
         userId: '',
@@ -95,7 +95,7 @@ export class AuthenticationManager implements IAuthenticationManager {
     
     // Check if Copilot token is provided
     if (!copilotToken || copilotToken.trim() === '') {
-      logger.debug('Authentication failed: missing Copilot token');
+      getLogger().debug('Authentication failed: missing Copilot token');
       return {
         authenticated: false,
         userId: '',
@@ -104,10 +104,10 @@ export class AuthenticationManager implements IAuthenticationManager {
     }
     
     // Verify API key using timing-attack resistant comparison
-    const userId = await this.verifyApiKey(apiKey);
+    const userId = this.verifyApiKey(apiKey);
     
     if (userId === null) {
-      logger.debug({ apiKeyPrefix: this.getApiKeyPrefix(apiKey) }, 'Authentication failed: invalid API key');
+      getLogger().debug({ apiKeyPrefix: this.getApiKeyPrefix(apiKey) }, 'Authentication failed: invalid API key');
       return {
         authenticated: false,
         userId: '',
@@ -115,7 +115,7 @@ export class AuthenticationManager implements IAuthenticationManager {
       };
     }
     
-    logger.debug({ userId }, 'Authentication successful');
+    getLogger().debug({ userId }, 'Authentication successful');
     
     // Return successful authentication result with preserved Copilot token
     return {
@@ -134,7 +134,7 @@ export class AuthenticationManager implements IAuthenticationManager {
    * @param apiKey - The API key to verify
    * @returns The user ID if valid, null if invalid
    */
-  private async verifyApiKey(apiKey: string): Promise<string | null> {
+  private verifyApiKey(apiKey: string): string | null {
     let foundUserId: string | null = null;
     
     // Check against all stored API keys using timing-attack resistant comparison
@@ -182,7 +182,7 @@ export class AuthenticationManager implements IAuthenticationManager {
       return crypto.timingSafeEqual(inputBuffer, validBuffer);
     } catch (error) {
       // If comparison fails for any reason, return false
-      logger.error({ error }, 'Error during timing-safe comparison');
+      getLogger().error({ error }, 'Error during timing-safe comparison');
       return false;
     }
   }
@@ -199,7 +199,7 @@ export class AuthenticationManager implements IAuthenticationManager {
     }
     
     this.apiKeys.set(apiKey, userId);
-    logger.info({ userId, apiKeyPrefix: this.getApiKeyPrefix(apiKey) }, 'API key added');
+    getLogger().info({ userId, apiKeyPrefix: this.getApiKeyPrefix(apiKey) }, 'API key added');
   }
   
   /**
@@ -214,7 +214,7 @@ export class AuthenticationManager implements IAuthenticationManager {
     
     const removed = this.apiKeys.delete(apiKey);
     if (removed) {
-      logger.info({ apiKeyPrefix: this.getApiKeyPrefix(apiKey) }, 'API key removed');
+      getLogger().info({ apiKeyPrefix: this.getApiKeyPrefix(apiKey) }, 'API key removed');
     }
   }
   

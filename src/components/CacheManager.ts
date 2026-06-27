@@ -5,14 +5,15 @@
  * supporting exact and fuzzy matching with TTL-based expiration.
  */
 
-import { CacheEntry, CompressedResponse, CacheStatistics } from '../types/cache';
-import { CopilotResponse } from '../types/copilot';
+import { CacheEntry, CompressedResponse, CacheStatistics } from '../types/cache.js';
+import { CopilotResponse } from '../types/copilot.js';
 import crypto from 'crypto';
 import zlib from 'zlib';
 import { promisify } from 'util';
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
+const GZIP_LEVEL = 6;
 
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -120,6 +121,8 @@ export class CacheManager implements ICacheManager {
   private cache: Map<string, CacheEntry>;
   private maxEntries: number;
   private ttlMilliseconds: number;
+  private compressionEnabled: boolean;
+  private maxSearchEntries: number;
   private encryptionKey: Buffer | null = null;
   
   // LRU tracking with doubly-linked list
@@ -136,12 +139,16 @@ export class CacheManager implements ICacheManager {
    * @param maxEntries Maximum number of cache entries (default: 10,000)
    * @param ttlHours Cache TTL in hours (default: 24)
    * @param encryptionSecret Optional secret for AES-256-GCM encryption at rest
+   * @param compressionEnabled Whether to gzip-compress cached responses (default: true)
+   * @param maxSearchEntries Maximum entries to search in similarity lookup (default: 100)
    */
-  constructor(maxEntries = 10000, ttlHours = 24, encryptionSecret?: string) {
+  constructor(maxEntries = 10000, ttlHours = 24, encryptionSecret?: string, compressionEnabled = true, maxSearchEntries = 100) {
     this.cache = new Map();
     this.lruMap = new Map();
     this.maxEntries = maxEntries;
     this.ttlMilliseconds = ttlHours * 60 * 60 * 1000;
+    this.compressionEnabled = compressionEnabled;
+    this.maxSearchEntries = maxSearchEntries;
     if (encryptionSecret) {
       this.encryptionKey = deriveKey(encryptionSecret);
     }
@@ -177,9 +184,9 @@ export class CacheManager implements ICacheManager {
     
     this.totalHits++;
     
-    // Decrypt if encrypted, then decompress
+    // Decrypt if encrypted, then decompress (if compressed)
     const rawData = this.encryptionKey ? decrypt(entry.response.data, this.encryptionKey) : entry.response.data;
-    const decompressedData = await gunzip(rawData);
+    const decompressedData = this.compressionEnabled ? await gunzip(rawData) : rawData;
     return {
       ...entry,
       response: {
@@ -195,7 +202,7 @@ export class CacheManager implements ICacheManager {
    */
   async lookupSimilar(contextHash: string, threshold: number): Promise<CacheEntry | null> {
     // Get recent entries (limited to 100 for performance)
-    const recentEntries = Array.from(this.cache.entries()).slice(0, 100);
+    const recentEntries = Array.from(this.cache.entries()).slice(-this.maxSearchEntries);
     
     let bestMatch: CacheEntry | null = null;
     let bestScore = 0;
@@ -226,9 +233,9 @@ export class CacheManager implements ICacheManager {
       
       this.totalHits++;
 
-      // Decrypt if encrypted, then decompress
+      // Decrypt if encrypted, then decompress (if compressed)
       const rawData = this.encryptionKey ? decrypt(bestMatch.response.data, this.encryptionKey) : bestMatch.response.data;
-      const decompressedData = await gunzip(rawData);
+      const decompressedData = this.compressionEnabled ? await gunzip(rawData) : rawData;
       return {
         ...bestMatch,
         response: {
@@ -253,13 +260,13 @@ export class CacheManager implements ICacheManager {
       await this.evictLRU(1);
     }
     
-    // Compress response with gzip
+    // Compress response with gzip (if enabled) or use raw JSON
     const responseJson = JSON.stringify(response);
     const originalSize = Buffer.byteLength(responseJson, 'utf8');
-    const compressed = await gzip(responseJson, { level: 6 });
+    const data = this.compressionEnabled ? await gzip(responseJson, { level: GZIP_LEVEL }) : Buffer.from(responseJson, 'utf8');
     
     // Optionally encrypt the compressed data
-    const stored = this.encryptionKey ? encrypt(compressed, this.encryptionKey) : compressed;
+    const stored = this.encryptionKey ? encrypt(data, this.encryptionKey) : data;
     
     const compressedResponse: CompressedResponse = {
       data: stored,

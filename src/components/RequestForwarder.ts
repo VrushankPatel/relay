@@ -9,6 +9,7 @@ const BASE_RETRY_MS = 100;
 const CIRCUIT_BREAKER_THRESHOLD = 5;
 const CIRCUIT_BREAKER_RESET_MS = 30000;
 const REQUEST_TIMEOUT_MS = 30000;
+const MAX_SOCKETS = 20;
 
 type CircuitState = 'closed' | 'open' | 'half-open';
 
@@ -33,10 +34,10 @@ export class RequestForwarder implements IRequestForwarder {
     this.logger = createChildLogger('RequestForwarder');
     this.agent = new https.Agent({
       keepAlive: true,
-      maxSockets: 20,
+      maxSockets: MAX_SOCKETS,
       keepAliveMsecs: 120000,
     });
-    this.logger.info({ maxSockets: 20 }, 'Request Forwarder initialized');
+    this.logger.info({ maxSockets: MAX_SOCKETS }, 'Request Forwarder initialized');
   }
 
   async forward(body: Record<string, unknown>, copilotToken: string): Promise<CopilotResponse> {
@@ -115,9 +116,13 @@ export class RequestForwarder implements IRequestForwarder {
       ? Math.round(this.totalLatency / this.totalRequests)
       : 0;
 
+    const activeSockets = this.agent.sockets
+      ? Object.values(this.agent.sockets).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0)
+      : 0;
+
     return {
-      totalConnections: 20,
-      activeConnections: this.agent.requests,
+      totalConnections: MAX_SOCKETS,
+      activeConnections: activeSockets,
       queuedRequests: 0,
       averageLatency,
     };
@@ -196,5 +201,9 @@ export class RequestForwarder implements IRequestForwarder {
       msg.includes('503') ||
       msg.includes('502')
     );
+  }
+
+  destroy(): void {
+    this.agent.destroy();
   }
 }

@@ -7,12 +7,12 @@ import { CacheManager } from './components/CacheManager.js';
 import { DeduplicationManager } from './components/DeduplicationManager.js';
 import { TokenAnalyzer } from './components/TokenAnalyzer.js';
 import { RequestForwarder } from './components/RequestForwarder.js';
-import { HealthMonitor } from './components/HealthMonitor.js';
+import { HealthMonitor, SERVICE_VERSION } from './components/HealthMonitor.js';
 import { MetricsCollector } from './components/MetricsCollector.js';
 import { APIGatewayImpl } from './components/APIGateway.js';
 import type { HTTPResponse } from './components/APIGateway.js';
 import type { AuthenticatedRequest } from './types/requests.js';
-import type { CopilotResponse } from './types/copilot.js';
+import type { CopilotResponse, Completion } from './types/copilot.js';
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -24,12 +24,12 @@ async function main(): Promise<void> {
   const config = await configManager.loadConfig();
 
   initializeLogger({
-    level: config.logging.level.toLowerCase() as any,
+      level: config.logging.level.toLowerCase() as 'debug' | 'info' | 'warn' | 'error',
     prettyPrint: config.logging.prettyPrint,
   });
 
   const logger = createChildLogger('Application');
-  logger.info({ version: '1.0.0' }, 'GitHub Copilot Token Optimizer Proxy starting');
+  logger.info({ version: SERVICE_VERSION }, 'GitHub Copilot Token Optimizer Proxy starting');
 
   const apiKey = process.env.API_KEY || 'dev-key';
   const authManager = new AuthenticationManager({
@@ -38,10 +38,17 @@ async function main(): Promise<void> {
 
   const requestProcessor = new RequestProcessor();
   const encryptionSecret = config.security.encryptCache ? (process.env.ENCRYPTION_SECRET || undefined) : undefined;
-  const cacheManager = new CacheManager(config.cache.maxEntries, config.cache.ttlHours, encryptionSecret);
+  const cacheManager = new CacheManager(
+    config.cache.maxEntries,
+    config.cache.ttlHours,
+    encryptionSecret,
+    config.cache.compressionEnabled,
+    config.similarity.maxSearchEntries,
+  );
   const dedupManager = new DeduplicationManager();
   const tokenAnalyzer = new TokenAnalyzer(
     config.tokens.budgetPerUserPerDay,
+    config.tokens.warningThresholdPercent,
     createChildLogger('TokenAnalyzer'),
   );
 
@@ -130,27 +137,30 @@ async function main(): Promise<void> {
     };
     const safeCacheStore = async (hash: string, resp: CopilotResponse, uid: string) => {
       try { await cacheManager.store(hash, resp, uid); }
-      catch (e) { log.error({ error: e }, 'Cache store failed'); }
+      catch (e) { log.debug({ error: e }, 'Cache store failed'); }
     };
-    const safeTokenCount = (completions: any[]) => {
+    const safeTokenCount = (completions: Completion[]) => {
       try { return tokenAnalyzer.countResponseTokens(completions); }
       catch { return 0; }
     };
     const safeTokenConsume = (uid: string, tokens: number, fromCache: boolean) => {
       try { tokenAnalyzer.recordConsumption(uid, tokens, fromCache); }
-      catch { /* skip token tracking on failure */ }
+      catch (e) { log.debug({ error: e, action: 'recordConsumption' }, 'Token tracking failed, degrading'); }
     };
     const safeBudgetCheck = (uid: string) => {
       try { return tokenAnalyzer.checkBudget(uid); }
-      catch { return { withinBudget: true, consumed: 0, limit: undefined, remaining: Infinity, percentUsed: 0 } as any; }
+      catch (e) {
+        log.debug({ error: e, action: 'checkBudget' }, 'Budget check failed, degrading');
+        return { withinBudget: true, consumed: 0, limit: undefined, remaining: Infinity, percentUsed: 0 } as import('./components/TokenAnalyzer.js').BudgetStatus;
+      }
     };
     const safeMetricsTokens = (consumed: number, saved: number) => {
       try { metricsCollector.recordTokens(consumed, saved); }
-      catch { /* skip metrics on failure */ }
+      catch (e) { log.debug({ error: e, action: 'recordTokens' }, 'Metrics tracking failed, degrading'); }
     };
     const safeMetricsError = (type: string) => {
       try { metricsCollector.recordError(type); }
-      catch { /* skip metrics on failure */ }
+      catch (e) { log.debug({ error: e, action: 'recordError' }, 'Metrics error failed, degrading'); }
     };
 
     try {
@@ -250,17 +260,31 @@ async function main(): Promise<void> {
     Object.assign(config, newConfig);
     logger.info({ changes: newConfig }, 'Configuration updated via hot-reload');
     initializeLogger({
-      level: config.logging.level.toLowerCase() as any,
+    level: config.logging.level.toLowerCase() as 'debug' | 'info' | 'warn' | 'error',
       prettyPrint: config.logging.prettyPrint,
     });
   });
 
   await gateway.start(config.server.host, config.server.port);
   logger.info({ host: config.server.host, port: config.server.port }, 'Proxy server started');
+
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, 'Received shutdown signal, stopping gracefully');
+    metricsCollector.destroy();
+    tokenAnalyzer.destroy();
+    requestForwarder.destroy();
+    configManager.unwatchConfig();
+    await gateway.stop();
+    logger.info('Graceful shutdown complete');
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((error) => {
-  console.error('Failed to start proxy:', error);
+  process.stderr.write('Failed to start proxy: ' + String(error) + '\n');
   process.exit(1);
 });
 

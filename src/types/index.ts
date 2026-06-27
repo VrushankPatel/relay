@@ -29,7 +29,6 @@ export type {
 export type {
   CopilotResponse,
   Completion,
-  ForwardRequest,
 } from './copilot.js';
 
 // Configuration types
@@ -46,7 +45,6 @@ export type {
 // Metrics types
 export type {
   MetricsSummary,
-  TimeRange,
 } from './metrics.js';
 
 // Health monitoring types

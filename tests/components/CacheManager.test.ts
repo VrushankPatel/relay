@@ -5,9 +5,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CacheManager } from '../../src/components/CacheManager';
-import { CopilotResponse } from '../../src/types/copilot';
-import { CacheEntry } from '../../src/types/cache';
+import { CacheManager } from '../../src/components/CacheManager.js';
+import { CopilotResponse } from '../../src/types/copilot.js';
+import { CacheEntry } from '../../src/types/cache.js';
 
 describe('CacheManager', () => {
   let cacheManager: CacheManager;
@@ -475,15 +475,15 @@ describe('CacheManager', () => {
         tokenCount: 5,
       };
 
-      await cacheManager.store('test1234', response, 'user1');
-      await cacheManager.store('test1235', response, 'user1');
-      await cacheManager.store('test1299', response, 'user1');
+      await cacheManager.store('abcd1234', response, 'user1');
+      await cacheManager.store('abcd1255', response, 'user1');
+      await cacheManager.store('abcd9999', response, 'user1');
 
-      // Search for 'test1236' - closest is 'test1235'
-      const entry = await cacheManager.lookupSimilar('test1236', 85);
+      // Search for 'abcd1256' - closest is 'abcd1255' (distance 1, 87.5%) vs 'abcd1234' (distance 2, 75%)
+      const entry = await cacheManager.lookupSimilar('abcd1256', 85);
 
       expect(entry).not.toBeNull();
-      expect(entry?.contextHash).toBe('test1235'); // Closest match
+      expect(entry?.contextHash).toBe('abcd1255');
     });
   });
 
@@ -536,6 +536,30 @@ describe('CacheManager', () => {
 
       // Hit rate = 2 / (2 + 3) = 40%
       expect(stats.hitRate).toBeCloseTo(40, 1);
+    });
+  });
+
+  describe('encryption at rest', () => {
+    it('should encrypt and decrypt cache entries', async () => {
+      const encryptedCache = new CacheManager(100, 24, 'test-secret-key');
+      const response: CopilotResponse = { completions: [{ text: 'encrypted data', confidence: 0.9 }], model: 'test', tokenCount: 10 };
+      await encryptedCache.store('hash1', response, 'user1');
+      const entry = await encryptedCache.lookupExact('hash1');
+      expect(entry).not.toBeNull();
+      const responseData = JSON.parse(entry!.response.data.toString('utf8')) as CopilotResponse;
+      expect(responseData.completions[0].text).toBe('encrypted data');
+    });
+  });
+
+  describe('compression disabled', () => {
+    it('should store without compression', async () => {
+      const noCompressCache = new CacheManager(100, 24, undefined, false);
+      const response: CopilotResponse = { completions: [{ text: 'no compression', confidence: 0.9 }], model: 'test', tokenCount: 10 };
+      await noCompressCache.store('hash1', response, 'user1');
+      const entry = await noCompressCache.lookupExact('hash1');
+      expect(entry).not.toBeNull();
+      const responseData = JSON.parse(entry!.response.data.toString('utf8')) as CopilotResponse;
+      expect(responseData.completions[0].text).toBe('no compression');
     });
   });
 });

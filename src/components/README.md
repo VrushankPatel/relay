@@ -11,7 +11,6 @@ This directory contains the core component implementations for the proxy service
 - **DeduplicationManager** - Prevents duplicate simultaneous requests
 - **RequestForwarder** - Connection pooling to GitHub Copilot API
 - **TokenAnalyzer** - Token counting and budget tracking
-- **ResponseOptimizer** - Compression and deduplication
 - **MetricsCollector** - Prometheus metrics collection
 - **ConfigurationManager** - Configuration loading and hot-reload
 - **HealthMonitor** - Health checks and diagnostics

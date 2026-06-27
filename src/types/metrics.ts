@@ -33,13 +33,4 @@ export interface MetricsSummary {
   requestsPerSecond: number;
 }
 
-/**
- * A time range for querying metrics data.
- */
-export interface TimeRange {
-  /** Start of the time range (inclusive) */
-  start: Date;
-  
-  /** End of the time range (inclusive) */
-  end: Date;
-}
+

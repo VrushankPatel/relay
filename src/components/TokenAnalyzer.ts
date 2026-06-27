@@ -12,15 +12,18 @@
 
 import type { Completion } from '../types/copilot.js';
 import { Tiktoken } from 'tiktoken';
+import cl100k_base from 'tiktoken/encoders/cl100k_base.json';
+import { createChildLogger } from '../utils/logger.js';
+
+const PERFORMANCE_TARGET_MS = 5;
+const TOKEN_APPROXIMATION_RATIO = 4;
 
 let _tokenizer: Tiktoken | null = null;
 
-async function getTokenizer(): Promise<Tiktoken> {
-  if (!_tokenizer) {
-    const { cl100k_base } = await import('tiktoken/encoders/cl100k_base.json', { assert: { type: 'json' } });
-    _tokenizer = new Tiktoken(cl100k_base);
-  }
-  return _tokenizer;
+try {
+  _tokenizer = new Tiktoken(cl100k_base.bpe_ranks, cl100k_base.special_tokens, cl100k_base.pat_str);
+} catch {
+  // Fallback to length/4 approximation if tiktoken initialization fails
 }
 
 /**
@@ -83,17 +86,24 @@ export class TokenAnalyzer {
   /** Optional token budget per user per day */
   private budgetPerUserPerDay: number | undefined;
   
+  /** Warning threshold percentage (0-100) */
+  private warningThresholdPercent: number;
+  
   /** Logger instance for this component */
-  private logger: any;
+  private logger: ReturnType<typeof createChildLogger> | undefined;
+  private midnightTimer: ReturnType<typeof setTimeout> | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   
   /**
    * Creates a new TokenAnalyzer instance.
    * 
    * @param budgetPerUserPerDay - Optional daily token limit per user
+   * @param warningThresholdPercent - Percentage at which to warn (default 90)
    * @param logger - Logger instance for logging events
    */
-  constructor(budgetPerUserPerDay?: number, logger?: any) {
+  constructor(budgetPerUserPerDay?: number, warningThresholdPercent = 90, logger?: ReturnType<typeof createChildLogger>) {
     this.budgetPerUserPerDay = budgetPerUserPerDay;
+    this.warningThresholdPercent = warningThresholdPercent;
     this.logger = logger;
     
     // Schedule midnight UTC cleanup
@@ -113,10 +123,10 @@ export class TokenAnalyzer {
     
     // Use tiktoken cl100k_base for accurate counting matching GitHub Copilot
     const tokenizer = _tokenizer;
-    const tokenCount = tokenizer ? tokenizer.encode(prompt).length : Math.ceil(prompt.length / 4);
+    const tokenCount = tokenizer ? tokenizer.encode(prompt).length : Math.ceil(prompt.length / TOKEN_APPROXIMATION_RATIO);
     
     const elapsed = performance.now() - startTime;
-    if (elapsed > 5) {
+    if (elapsed > PERFORMANCE_TARGET_MS) {
       this.logger?.warn({
         component: 'TokenAnalyzer',
         method: 'countRequestTokens',
@@ -143,11 +153,11 @@ export class TokenAnalyzer {
     const tokenizer = _tokenizer;
     
     for (const completion of completions) {
-      totalTokens += tokenizer ? tokenizer.encode(completion.text).length : Math.ceil(completion.text.length / 4);
+      totalTokens += tokenizer ? tokenizer.encode(completion.text).length : Math.ceil(completion.text.length / TOKEN_APPROXIMATION_RATIO);
     }
     
     const elapsed = performance.now() - startTime;
-    if (elapsed > 5) {
+    if (elapsed > PERFORMANCE_TARGET_MS) {
       this.logger?.warn({
         component: 'TokenAnalyzer',
         method: 'countResponseTokens',
@@ -218,17 +228,17 @@ export class TokenAnalyzer {
       consumption.tokensConsumed += tokens;
     }
     
-    // Check if user has reached 90% of budget (warning threshold)
+    // Check if user has reached the warning threshold
     if (this.budgetPerUserPerDay) {
       const percentUsed = (consumption.tokensConsumed / this.budgetPerUserPerDay) * 100;
-      if (percentUsed >= 90 && percentUsed < 100) {
+      if (percentUsed >= this.warningThresholdPercent && percentUsed < 100) {
         this.logger?.warn({
           component: 'TokenAnalyzer',
           userId,
           consumed: consumption.tokensConsumed,
           limit: this.budgetPerUserPerDay,
           percentUsed: percentUsed.toFixed(2),
-          message: 'User approaching token budget limit (90% threshold)'
+          message: `User approaching token budget limit (${this.warningThresholdPercent}% threshold)`
         });
       }
     }
@@ -306,11 +316,10 @@ export class TokenAnalyzer {
     
     const msUntilMidnight = tomorrow.getTime() - now.getTime();
     
-    setTimeout(() => {
+    this.midnightTimer = setTimeout(() => {
       this.cleanupOldRecords();
       
-      // Schedule next cleanup (every 24 hours)
-      setInterval(() => {
+      this.cleanupInterval = setInterval(() => {
         this.cleanupOldRecords();
       }, 24 * 60 * 60 * 1000);
     }, msUntilMidnight);
@@ -367,6 +376,19 @@ export class TokenAnalyzer {
    * 
    * This is primarily for testing purposes.
    */
+  destroy(): void {
+    if (this.midnightTimer !== null) {
+      clearTimeout(this.midnightTimer);
+      this.midnightTimer = null;
+    }
+    if (this.cleanupInterval !== null) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.consumptionMap.clear();
+    this.cumulativeSavings = 0;
+  }
+
   reset(): void {
     this.consumptionMap.clear();
     this.cumulativeSavings = 0;

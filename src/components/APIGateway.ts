@@ -9,7 +9,10 @@
 
 import http from 'http';
 import { HTTPRequest, CompletionRequestBody, AuthResult, AuthenticatedRequest } from '../types/requests.js';
-import { logger } from '../utils/logger.js';
+import { getLogger } from '../utils/logger.js';
+
+const COMPLETIONS_PATH = '/v1/completions';
+const RETRY_AFTER_SECONDS = 5;
 
 /**
  * HTTP response sent back to the client.
@@ -131,7 +134,7 @@ export class APIGatewayImpl implements APIGateway {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
         this.handleHttpRequest(req, res).catch((error) => {
-          logger.error({ error, url: req.url }, 'Unhandled error in request handler');
+          getLogger().error({ error, url: req.url }, 'Unhandled error in request handler');
           if (!res.headersSent) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
@@ -143,12 +146,12 @@ export class APIGatewayImpl implements APIGateway {
       });
 
       this.server.on('error', (error) => {
-        logger.error({ error }, 'Server error');
+        getLogger().error({ error }, 'Server error');
         reject(error);
       });
 
       this.server.listen(port, host, () => {
-        logger.info({ host, port }, 'API Gateway started');
+        getLogger().info({ host, port }, 'API Gateway started');
         resolve();
       });
     });
@@ -164,12 +167,14 @@ export class APIGatewayImpl implements APIGateway {
         return;
       }
 
+      this.server.closeAllConnections?.();
       this.server.close((error) => {
         if (error) {
-          logger.error({ error }, 'Error stopping server');
+          getLogger().error({ error }, 'Error stopping server');
           reject(error);
         } else {
-          logger.info('API Gateway stopped');
+          this.server = null;
+          getLogger().info('API Gateway stopped');
           resolve();
         }
       });
@@ -187,11 +192,11 @@ export class APIGatewayImpl implements APIGateway {
     if (this.activeConnections >= this.maxConcurrentRequests) {
       this.sendResponse(res, {
         statusCode: 503,
-        headers: { 'Content-Type': 'application/json', 'Retry-After': '5' },
+        headers: { 'Content-Type': 'application/json', 'Retry-After': String(RETRY_AFTER_SECONDS) },
         body: JSON.stringify({
           error: 'Service temporarily unavailable',
           code: 'SERVICE_BUSY',
-          retryAfter: 5
+          retryAfter: RETRY_AFTER_SECONDS
         })
       });
       return;
@@ -199,14 +204,16 @@ export class APIGatewayImpl implements APIGateway {
 
     this.activeConnections++;
     const requestStartTime = Date.now();
+    let requestTimedOut = false;
 
     try {
       // Set timeout for the request
       const timeoutId = setTimeout(() => {
         if (!res.headersSent) {
+          requestTimedOut = true;
           this.sendResponse(res, {
             statusCode: 503,
-            headers: { 'Content-Type': 'application/json', 'Retry-After': '5' },
+        headers: { 'Content-Type': 'application/json', 'Retry-After': String(RETRY_AFTER_SECONDS) },
             body: JSON.stringify({
               error: 'Request timeout',
               code: 'REQUEST_TIMEOUT',
@@ -229,7 +236,7 @@ export class APIGatewayImpl implements APIGateway {
         }
 
         // Only handle POST /v1/completions
-        if (req.method !== 'POST' || req.url !== '/v1/completions') {
+        if (req.method !== 'POST' || req.url !== COMPLETIONS_PATH) {
           clearTimeout(timeoutId);
           this.sendResponse(res, {
             statusCode: 404,
@@ -253,16 +260,33 @@ export class APIGatewayImpl implements APIGateway {
           timestamp: Date.now()
         };
 
+        // Process the request (timeout remains active during handler execution)
+        const response = await this.handleCompletionRequest(httpRequest);
         clearTimeout(timeoutId);
 
-        // Process the request
-        const response = await this.handleCompletionRequest(httpRequest);
-        this.sendResponse(res, response);
-        
+        // Guard against double-response if the timeout already fired
+        if (!requestTimedOut) {
+          this.sendResponse(res, response);
+        }
+
         const duration = Date.now() - requestStartTime;
-        logger.debug({ duration, statusCode: response.statusCode }, 'Request completed');
+        getLogger().debug({ duration, statusCode: response.statusCode }, 'Request completed');
       } catch (error) {
         clearTimeout(timeoutId);
+        if (error instanceof ValidationError) {
+          if (!requestTimedOut) {
+            this.sendResponse(res, {
+              statusCode: 400,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                error: 'Invalid request format',
+                code: 'INVALID_REQUEST',
+                details: error.message
+              })
+            });
+          }
+          return;
+        }
         throw error;
       }
     } finally {
@@ -286,19 +310,19 @@ export class APIGatewayImpl implements APIGateway {
           const parsed = JSON.parse(data);
           
           // Validate required fields
-          if (!parsed.prompt || typeof parsed.prompt !== 'string') {
+          if (typeof parsed.prompt !== 'string' || parsed.prompt.length === 0) {
             reject(new ValidationError('Missing or invalid field: prompt'));
             return;
           }
-          if (!parsed.language || typeof parsed.language !== 'string') {
+          if (typeof parsed.language !== 'string') {
             reject(new ValidationError('Missing or invalid field: language'));
             return;
           }
-          if (parsed.cursorPosition === undefined || typeof parsed.cursorPosition !== 'number') {
+          if (typeof parsed.cursorPosition !== 'number') {
             reject(new ValidationError('Missing or invalid field: cursorPosition'));
             return;
           }
-          if (!parsed.fileContext || typeof parsed.fileContext !== 'string') {
+          if (typeof parsed.fileContext !== 'string') {
             reject(new ValidationError('Missing or invalid field: fileContext'));
             return;
           }
@@ -417,7 +441,7 @@ export class APIGatewayImpl implements APIGateway {
         };
       }
 
-      logger.error({ error }, 'Error handling completion request');
+      getLogger().error({ error }, 'Error handling completion request');
       return {
         statusCode: 500,
         headers: { 'Content-Type': 'application/json' },

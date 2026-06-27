@@ -30,25 +30,4 @@ export interface Completion {
   confidence: number;
 }
 
-/**
- * Request to be forwarded to the GitHub Copilot API.
- * 
- * This is constructed from the original IDE request with appropriate
- * authentication tokens and parameters.
- */
-export interface ForwardRequest {
-  /** The code prompt/context to send to Copilot */
-  prompt: string;
-  
-  /** Programming language of the code */
-  language: string;
-  
-  /** User's GitHub Copilot authentication token */
-  copilotToken: string;
-  
-  /** Optional maximum number of tokens to generate */
-  maxTokens?: number;
-  
-  /** Optional temperature parameter for controlling randomness (0-1) */
-  temperature?: number;
-}
+

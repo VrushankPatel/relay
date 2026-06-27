@@ -6,8 +6,12 @@
  */
 
 import crypto from 'crypto';
-import { CodeContext, NormalizedContext } from '../types/context';
-import { CompletionRequestBody } from '../types/requests';
+import { CodeContext, NormalizedContext } from '../types/context.js';
+import { CompletionRequestBody } from '../types/requests.js';
+
+const MAX_PRECEDING_CHARS = 500;
+const MAX_FOLLOWING_CHARS = 100;
+const TAB_WIDTH = 4;
 
 /**
  * Request Processor interface defining context extraction and hashing operations.
@@ -53,14 +57,14 @@ export class RequestProcessor implements IRequestProcessor {
     
     // Extract preceding content (up to 500 characters before cursor)
     const precedingContent = fileContext.slice(
-      Math.max(0, cursorPosition - 500),
+      Math.max(0, cursorPosition - MAX_PRECEDING_CHARS),
       cursorPosition
     );
     
     // Extract following content (up to 100 characters after cursor)
     const followingContent = fileContext.slice(
       cursorPosition,
-      Math.min(fileContext.length, cursorPosition + 100)
+      Math.min(fileContext.length, cursorPosition + MAX_FOLLOWING_CHARS)
     );
     
     return {
@@ -127,7 +131,7 @@ export class RequestProcessor implements IRequestProcessor {
     let normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     
     // Step 2: Convert tabs to 4-space equivalent
-    normalized = normalized.replace(/\t/g, '    ');
+    normalized = normalized.replace(/\t/g, ' '.repeat(TAB_WIDTH));
     
     // Step 3: Process line by line to preserve structure
     const lines = normalized.split('\n');
