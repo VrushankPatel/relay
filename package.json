@@ -12,7 +12,11 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "bin:build": "npm run build && pkg dist/index.js --targets node20-macos-arm64,node20-macos-x64,node20-linux-x64,node20-linux-arm64,node20-win-x64 --output bin/relay",
+    "bin:mac": "npm run build && pkg dist/index.js --targets node20-macos-arm64 --output bin/relay-macos-arm64",
+    "bin:linux": "npm run build && pkg dist/index.js --targets node20-linux-x64 --output bin/relay-linux-x64",
+    "bin:win": "npm run build && pkg dist/index.js --targets node20-win-x64 --output bin/relay-windows-x64.exe"
   },
   "keywords": [
     "github-copilot",
@@ -22,6 +26,15 @@
   ],
   "author": "",
   "license": "MIT",
+  "bin": "dist/index.js",
+  "pkg": {
+    "assets": [
+      "dist/**/*"
+    ],
+    "scripts": [
+      "dist/index.js"
+    ]
+  },
   "dependencies": {
     "js-yaml": "^4.1.0",
     "pino": "^8.17.2",
@@ -34,6 +47,7 @@
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
     "@vitest/coverage-v8": "^1.1.0",
+    "@yao-pkg/pkg": "^6.20.0",
     "eslint": "^8.56.0",
     "fast-check": "^3.15.0",
     "prettier": "^3.1.1",

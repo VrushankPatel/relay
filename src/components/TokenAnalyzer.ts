@@ -12,7 +12,10 @@
 
 import type { Completion } from '../types/copilot.js';
 import { Tiktoken } from 'tiktoken';
-import cl100k_base from 'tiktoken/encoders/cl100k_base.json';
+import { createRequire } from 'node:module';
+
+const _require = createRequire(import.meta.url);
+const cl100k_base: any = _require('tiktoken/encoders/cl100k_base.json');
 import { createChildLogger } from '../utils/logger.js';
 
 const PERFORMANCE_TARGET_MS = 5;

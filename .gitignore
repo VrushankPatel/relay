@@ -52,3 +52,6 @@ config.local.yaml
 # Temporary files
 tmp/
 temp/
+
+# Binaries
+bin/

@@ -1,0 +1,106 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-binaries:
+    name: Build binaries for ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: node20-macos-arm64
+            runner: macos-latest
+            output: relay-macos-arm64
+          - target: node20-macos-x64
+            runner: macos-latest
+            output: relay-macos-x64
+          - target: node20-linux-x64
+            runner: ubuntu-latest
+            output: relay-linux-x64
+          - target: node20-linux-arm64
+            runner: ubuntu-latest
+            output: relay-linux-arm64
+          - target: node20-win-x64
+            runner: windows-latest
+            output: relay-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npx pkg dist/index.js --targets ${{ matrix.target }} --output ${{ matrix.output }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compute checksums
+        run: |
+          cd artifacts
+          for f in relay-* relay-*.exe; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> checksums.txt
+            fi
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Relay ${{ github.ref_name }}
+          body: |
+            ## Relay ${{ github.ref_name }}
+
+            Download the binary for your platform:
+
+            | Platform | Binary | Checksum |
+            |---|---|---|
+            | macOS (Apple Silicon) | `relay-macos-arm64` | See `checksums.txt` |
+            | macOS (Intel) | `relay-macos-x64` | See `checksums.txt` |
+            | Linux (x64) | `relay-linux-x64` | See `checksums.txt` |
+            | Linux (arm64) | `relay-linux-arm64` | See `checksums.txt` |
+            | Windows (x64) | `relay-windows-x64.exe` | See `checksums.txt` |
+
+            ### Installation
+
+            ```bash
+            # macOS / Linux
+            chmod +x relay-macos-arm64
+            export API_KEY="your-secret-key"
+            ./relay-macos-arm64
+
+            # Set your IDE to use http://localhost:8080
+            ```
+
+            See [USAGE.md](https://github.com/VrushankPatel/relay/blob/main/USAGE.md) for the full guide.
+          files: |
+            artifacts/relay-*
+            artifacts/checksums.txt
+          draft: false
+          prerelease: false

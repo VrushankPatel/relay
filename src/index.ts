@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import http from 'http';
 import { ConfigurationManager } from './components/ConfigurationManager.js';
 import { initializeLogger, createChildLogger } from './utils/logger.js';
