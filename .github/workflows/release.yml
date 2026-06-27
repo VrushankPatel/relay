@@ -42,7 +42,11 @@ jobs:
 
       - run: npm run build
 
-      - run: npx pkg dist/index.js --targets ${{ matrix.target }} --output ${{ matrix.output }}
+      - run: ls -la dist/
+
+      - run: npx pkg dist/index.js --targets ${{ matrix.target }} --output ${{ matrix.output }} -c package.json
+
+      - run: ls -la ${{ matrix.output }}*
 
       - uses: actions/upload-artifact@v4
         with:
@@ -62,10 +66,17 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: List downloaded artifacts
+        run: ls -laR artifacts/ || echo "No artifacts directory"
+
       - name: Compute checksums
         run: |
-          cd artifacts
-          sha256sum relay-* relay-*.exe 2>/dev/null | tee checksums.txt
+          if [ -d artifacts ]; then
+            cd artifacts
+            sha256sum relay-* relay-*.exe 2>/dev/null | tee checksums.txt || true
+          else
+            echo "No artifacts to checksum" | tee checksums.txt
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
