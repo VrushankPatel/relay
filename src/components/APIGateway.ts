@@ -8,10 +8,12 @@
  */
 
 import http from 'http';
-import { HTTPRequest, CompletionRequestBody, AuthResult, AuthenticatedRequest } from '../types/requests.js';
+import { HTTPRequest, AuthenticatedRequest } from '../types/requests.js';
 import { getLogger } from '../utils/logger.js';
 
+const CHAT_COMPLETIONS_PATH = '/v1/chat/completions';
 const COMPLETIONS_PATH = '/v1/completions';
+const ANTHROPIC_MESSAGES_PATH = '/v1/messages';
 const RETRY_AFTER_SECONDS = 5;
 
 /**
@@ -47,10 +49,9 @@ export interface APIGateway {
   /**
    * Verify client authentication.
    * @param apiKey - The API key from request headers
-   * @param copilotToken - The GitHub Copilot authentication token
    * @returns Promise resolving to authentication result
    */
-  authenticate(apiKey: string, copilotToken: string): Promise<AuthResult>;
+  authenticate(apiKey: string): Promise<boolean>;
 
   /**
    * Route request to appropriate handler.
@@ -90,7 +91,7 @@ export class APIGatewayImpl implements APIGateway {
   private activeConnections = 0;
   private readonly maxConcurrentRequests: number;
   private readonly requestTimeoutMs: number;
-  private authenticator: ((apiKey: string, copilotToken: string) => Promise<AuthResult>) | null = null;
+  private authenticator: ((apiKey: string) => Promise<boolean>) | null = null;
   private routes: Map<string, RouteHandler> = new Map();
 
   /**
@@ -121,9 +122,9 @@ export class APIGatewayImpl implements APIGateway {
 
   /**
    * Set the authenticator function.
-   * @param authenticator - Function to verify API keys and Copilot tokens
+   * @param authenticator - Function to verify API keys
    */
-  setAuthenticator(authenticator: (apiKey: string, copilotToken: string) => Promise<AuthResult>): void {
+  setAuthenticator(authenticator: (apiKey: string) => Promise<boolean>): void {
     this.authenticator = authenticator;
   }
 
@@ -226,6 +227,22 @@ export class APIGatewayImpl implements APIGateway {
       try {
         // Check custom routes first (health, metrics, etc.)
         if (req.method && req.url) {
+          if (req.method === 'GET' && req.url === '/v1/models') {
+            clearTimeout(timeoutId);
+            this.sendResponse(res, {
+              statusCode: 200,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                object: 'list',
+                data: [
+                  { id: 'gpt-3.5-turbo', object: 'model', created: 1677610602, owned_by: 'openai' },
+                  { id: 'gpt-4o', object: 'model', created: 1715367049, owned_by: 'openai' }
+                ]
+              })
+            });
+            return;
+          }
+
           const routeKey = `${req.method.toUpperCase()}:${req.url}`;
           const routeHandler = this.routes.get(routeKey);
           if (routeHandler) {
@@ -235,8 +252,12 @@ export class APIGatewayImpl implements APIGateway {
           }
         }
 
-        // Only handle POST /v1/completions
-        if (req.method !== 'POST' || req.url !== COMPLETIONS_PATH) {
+        // Only handle specific LLM endpoints
+        if (req.method !== 'POST' || (
+          req.url !== CHAT_COMPLETIONS_PATH && 
+          req.url !== COMPLETIONS_PATH && 
+          req.url !== ANTHROPIC_MESSAGES_PATH
+        )) {
           clearTimeout(timeoutId);
           this.sendResponse(res, {
             statusCode: 404,
@@ -257,7 +278,8 @@ export class APIGatewayImpl implements APIGateway {
           headers: this.extractHeaders(req),
           body,
           clientIP: req.socket.remoteAddress || 'unknown',
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          url: req.url || ''
         };
 
         // Process the request (timeout remains active during handler execution)
@@ -297,7 +319,7 @@ export class APIGatewayImpl implements APIGateway {
   /**
    * Parse and validate the request body.
    */
-  private async parseRequestBody(req: http.IncomingMessage): Promise<CompletionRequestBody> {
+  private async parseRequestBody(req: http.IncomingMessage): Promise<unknown> {
     return new Promise((resolve, reject) => {
       let data = '';
       
@@ -308,34 +330,7 @@ export class APIGatewayImpl implements APIGateway {
       req.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          
-          // Validate required fields
-          if (typeof parsed.prompt !== 'string' || parsed.prompt.length === 0) {
-            reject(new ValidationError('Missing or invalid field: prompt'));
-            return;
-          }
-          if (typeof parsed.language !== 'string') {
-            reject(new ValidationError('Missing or invalid field: language'));
-            return;
-          }
-          if (typeof parsed.cursorPosition !== 'number') {
-            reject(new ValidationError('Missing or invalid field: cursorPosition'));
-            return;
-          }
-          if (typeof parsed.fileContext !== 'string') {
-            reject(new ValidationError('Missing or invalid field: fileContext'));
-            return;
-          }
-
-          const body: CompletionRequestBody = {
-            prompt: parsed.prompt,
-            language: parsed.language,
-            cursorPosition: parsed.cursorPosition,
-            fileContext: parsed.fileContext,
-            maxTokens: parsed.maxTokens
-          };
-
-          resolve(body);
+          resolve(parsed);
         } catch (error) {
           reject(new ValidationError('Invalid JSON in request body'));
         }
@@ -378,9 +373,6 @@ export class APIGatewayImpl implements APIGateway {
       // Extract API key from Authorization header
       const apiKey = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
       
-      // Extract GitHub Copilot token from X-GitHub-Token header
-      const copilotToken = req.headers.get('x-github-token') || '';
-      
       if (!apiKey) {
         return {
           statusCode: 401,
@@ -393,22 +385,10 @@ export class APIGatewayImpl implements APIGateway {
         };
       }
 
-      if (!copilotToken) {
-        return {
-          statusCode: 401,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            error: 'Authentication failed',
-            code: 'AUTH_FAILED',
-            message: 'Missing GitHub Copilot token'
-          })
-        };
-      }
-
       // Authenticate the request
-      const authResult = await this.authenticate(apiKey, copilotToken);
+      const isAuthenticated = await this.authenticate(apiKey);
       
-      if (!authResult.authenticated) {
+      if (!isAuthenticated) {
         return {
           statusCode: 401,
           headers: { 'Content-Type': 'application/json' },
@@ -422,8 +402,7 @@ export class APIGatewayImpl implements APIGateway {
 
       // Create authenticated request
       const authenticatedRequest: AuthenticatedRequest = {
-        request: req,
-        authResult
+        request: req
       };
 
       // Route the request
@@ -456,12 +435,12 @@ export class APIGatewayImpl implements APIGateway {
   /**
    * Verify client authentication.
    */
-  async authenticate(apiKey: string, copilotToken: string): Promise<AuthResult> {
+  async authenticate(apiKey: string): Promise<boolean> {
     if (!this.authenticator) {
       throw new Error('Authenticator not configured');
     }
     
-    return await this.authenticator(apiKey, copilotToken);
+    return await this.authenticator(apiKey);
   }
 
   /**

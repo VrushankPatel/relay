@@ -10,7 +10,8 @@
  * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 8.1, 8.2, 8.3, 8.4, 8.5
  */
 
-import type { Completion } from '../types/copilot.js';
+import type { InternalChatRequest, InternalChatResponse } from '../types/chat.js';
+import type { ModelsConfig } from '../types/config.js';
 import { Tiktoken } from 'tiktoken';
 import { createRequire } from 'node:module';
 
@@ -30,40 +31,40 @@ try {
 }
 
 /**
- * Status of a user's token budget for the current day.
+ * Status of a user's credit budget for the current day.
  */
 export interface BudgetStatus {
-  /** Number of tokens consumed by the user today */
+  /** Number of credits consumed by the user today */
   consumed: number;
   
-  /** Daily token limit for the user (undefined if no limit) */
+  /** Daily credit limit for the user (undefined if no limit) */
   limit: number | undefined;
   
-  /** Number of tokens remaining in the budget */
+  /** Number of credits remaining in the budget */
   remaining: number;
   
   /** Percentage of budget consumed (0-100) */
   percentUsed: number;
   
-  /** Whether the user is within their token budget */
+  /** Whether the user is within their credit budget */
   withinBudget: boolean;
 }
 
 /**
- * Daily token consumption tracking for a user.
+ * Daily credit consumption tracking for a user.
  */
 interface DailyConsumption {
   /** ISO date string (YYYY-MM-DD) */
   date: string;
   
-  /** Tokens consumed from API calls */
-  tokensConsumed: number;
+  /** Credits consumed from API calls */
+  creditsConsumed: number;
   
-  /** Tokens served from cache */
-  tokensFromCache: number;
+  /** Credits served from cache */
+  creditsFromCache: number;
   
-  /** Total tokens saved by caching */
-  tokensSaved: number;
+  /** Total credits saved by caching */
+  creditsSaved: number;
   
   /** Timestamp of first request today */
   firstRequest: number;
@@ -83,14 +84,17 @@ export class TokenAnalyzer {
   /** Map of userId to daily consumption data */
   private consumptionMap: Map<string, DailyConsumption> = new Map();
   
-  /** Cumulative token savings since service start */
+  /** Cumulative credit savings since service start */
   private cumulativeSavings: number = 0;
   
-  /** Optional token budget per user per day */
+  /** Optional credit budget per user per day */
   private budgetPerUserPerDay: number | undefined;
   
   /** Warning threshold percentage (0-100) */
   private warningThresholdPercent: number;
+  
+  /** Models configuration */
+  private modelsConfig: ModelsConfig;
   
   /** Logger instance for this component */
   private logger: ReturnType<typeof createChildLogger> | undefined;
@@ -100,11 +104,13 @@ export class TokenAnalyzer {
   /**
    * Creates a new TokenAnalyzer instance.
    * 
-   * @param budgetPerUserPerDay - Optional daily token limit per user
+   * @param modelsConfig - Models configuration for credit multipliers
+   * @param budgetPerUserPerDay - Optional daily credit limit per user
    * @param warningThresholdPercent - Percentage at which to warn (default 90)
    * @param logger - Logger instance for logging events
    */
-  constructor(budgetPerUserPerDay?: number, warningThresholdPercent = 90, logger?: ReturnType<typeof createChildLogger>) {
+  constructor(modelsConfig: ModelsConfig, budgetPerUserPerDay?: number, warningThresholdPercent = 90, logger?: ReturnType<typeof createChildLogger>) {
+    this.modelsConfig = modelsConfig;
     this.budgetPerUserPerDay = budgetPerUserPerDay;
     this.warningThresholdPercent = warningThresholdPercent;
     this.logger = logger;
@@ -114,19 +120,42 @@ export class TokenAnalyzer {
   }
   
   /**
-   * Count tokens in a request prompt using tiktoken cl100k_base encoding.
+   * Calculate credits based on input and output tokens for a specific model.
+   * 
+   * @param model - The model name
+   * @param inputTokens - Number of input tokens
+   * @param outputTokens - Number of output tokens
+   * @returns Number of credits
+   */
+  calculateCredits(model: string, inputTokens: number, outputTokens: number): number {
+    const multipliers = this.modelsConfig.creditMultipliers[model] || { input: 1, output: 1 };
+    return (inputTokens * multipliers.input / 1_000_000) + (outputTokens * multipliers.output / 1_000_000);
+  }
+
+  /**
+   * Count tokens in a chat request using tiktoken cl100k_base encoding.
    * 
    * Performance target: < 5ms
    * 
-   * @param prompt - The request prompt text
+   * @param req - The chat request
    * @returns Number of tokens
    */
-  countRequestTokens(prompt: string): number {
+  countRequestTokens(req: InternalChatRequest): number {
     const startTime = performance.now();
     
-    // Use tiktoken cl100k_base for accurate counting matching GitHub Copilot
+    let totalTokens = 0;
     const tokenizer = _tokenizer;
-    const tokenCount = tokenizer ? tokenizer.encode(prompt).length : Math.ceil(prompt.length / TOKEN_APPROXIMATION_RATIO);
+    
+    for (const msg of req.messages) {
+      totalTokens += 4; // overhead per message
+      if (msg.content) {
+        totalTokens += tokenizer ? tokenizer.encode(msg.content).length : Math.ceil(msg.content.length / TOKEN_APPROXIMATION_RATIO);
+      }
+      if (msg.name) {
+        totalTokens += tokenizer ? tokenizer.encode(msg.name).length : Math.ceil(msg.name.length / TOKEN_APPROXIMATION_RATIO);
+      }
+    }
+    totalTokens += 3; // general overhead
     
     const elapsed = performance.now() - startTime;
     if (elapsed > PERFORMANCE_TARGET_MS) {
@@ -138,25 +167,32 @@ export class TokenAnalyzer {
       });
     }
     
-    return tokenCount;
+    return totalTokens;
   }
   
   /**
-   * Count tokens in response completions using tiktoken cl100k_base encoding.
+   * Count tokens in a chat response using tiktoken cl100k_base encoding.
    * 
    * Performance target: < 5ms
    * 
-   * @param completions - Array of completion suggestions
+   * @param res - The chat response
    * @returns Number of tokens across all completions
    */
-  countResponseTokens(completions: Completion[]): number {
+  countResponseTokens(res: InternalChatResponse): number {
     const startTime = performance.now();
     
     let totalTokens = 0;
-    const tokenizer = _tokenizer;
     
-    for (const completion of completions) {
-      totalTokens += tokenizer ? tokenizer.encode(completion.text).length : Math.ceil(completion.text.length / TOKEN_APPROXIMATION_RATIO);
+    if (res.usage && res.usage.completion_tokens !== undefined) {
+      totalTokens = res.usage.completion_tokens;
+    } else {
+      const tokenizer = _tokenizer;
+      for (const choice of res.choices) {
+        const content = choice.message?.content;
+        if (content) {
+          totalTokens += tokenizer ? tokenizer.encode(content).length : Math.ceil(content.length / TOKEN_APPROXIMATION_RATIO);
+        }
+      }
     }
     
     const elapsed = performance.now() - startTime;
@@ -173,39 +209,43 @@ export class TokenAnalyzer {
   }
   
   /**
-   * Calculate tokens saved by a cache hit.
+   * Calculate credits saved by a cache hit.
    * 
-   * Token savings = request tokens + response tokens that would have been consumed.
+   * Savings = input + output tokens converted to credits.
    * 
-   * @param requestTokens - Number of tokens in the request
-   * @param responseTokens - Number of tokens in the response
-   * @returns Total tokens saved
+   * @param model - The model name
+   * @param requestTokens - Number of input tokens
+   * @param responseTokens - Number of output tokens
+   * @returns Total credits saved
    */
-  calculateSavings(requestTokens: number, responseTokens: number): number {
-    const savings = requestTokens + responseTokens;
+  calculateSavings(model: string, requestTokens: number, responseTokens: number): number {
+    const savings = this.calculateCredits(model, requestTokens, responseTokens);
     this.cumulativeSavings += savings;
     return savings;
   }
   
   /**
-   * Get cumulative token savings since service start.
+   * Get cumulative credit savings since service start.
    * 
-   * @returns Total tokens saved across all cache hits
+   * @returns Total credits saved across all cache hits
    */
   getCumulativeSavings(): number {
     return this.cumulativeSavings;
   }
   
   /**
-   * Record token consumption for a user.
+   * Record credit consumption for a user.
    * 
    * This tracks consumption per day and resets at midnight UTC.
    * 
    * @param userId - User identifier
-   * @param tokens - Number of tokens consumed
+   * @param model - The model name
+   * @param inputTokens - Number of input tokens
+   * @param outputTokens - Number of output tokens
    * @param fromCache - Whether this was served from cache
    */
-  recordConsumption(userId: string, tokens: number, fromCache: boolean = false): void {
+  recordConsumption(userId: string, model: string, inputTokens: number, outputTokens: number, fromCache: boolean = false): void {
+    const credits = this.calculateCredits(model, inputTokens, outputTokens);
     const today = this.getCurrentDateString();
     let consumption = this.consumptionMap.get(userId);
     
@@ -213,9 +253,9 @@ export class TokenAnalyzer {
     if (!consumption || consumption.date !== today) {
       consumption = {
         date: today,
-        tokensConsumed: 0,
-        tokensFromCache: 0,
-        tokensSaved: 0,
+        creditsConsumed: 0,
+        creditsFromCache: 0,
+        creditsSaved: 0,
         firstRequest: Date.now(),
         lastRequest: Date.now()
       };
@@ -225,33 +265,33 @@ export class TokenAnalyzer {
     // Update consumption
     consumption.lastRequest = Date.now();
     if (fromCache) {
-      consumption.tokensFromCache += tokens;
-      consumption.tokensSaved += tokens;
+      consumption.creditsFromCache += credits;
+      consumption.creditsSaved += credits;
     } else {
-      consumption.tokensConsumed += tokens;
+      consumption.creditsConsumed += credits;
     }
     
     // Check if user has reached the warning threshold
     if (this.budgetPerUserPerDay) {
-      const percentUsed = (consumption.tokensConsumed / this.budgetPerUserPerDay) * 100;
+      const percentUsed = (consumption.creditsConsumed / this.budgetPerUserPerDay) * 100;
       if (percentUsed >= this.warningThresholdPercent && percentUsed < 100) {
         this.logger?.warn({
           component: 'TokenAnalyzer',
           userId,
-          consumed: consumption.tokensConsumed,
+          consumed: consumption.creditsConsumed,
           limit: this.budgetPerUserPerDay,
           percentUsed: percentUsed.toFixed(2),
-          message: `User approaching token budget limit (${this.warningThresholdPercent}% threshold)`
+          message: `User approaching credit budget limit (${this.warningThresholdPercent}% threshold)`
         });
       }
     }
   }
   
   /**
-   * Check if a user is within their token budget.
+   * Check if a user is within their credit budget.
    * 
    * @param userId - User identifier
-   * @returns Budget status including consumption, limit, and remaining tokens
+   * @returns Budget status including consumption, limit, and remaining credits
    */
   checkBudget(userId: string): BudgetStatus {
     const today = this.getCurrentDateString();
@@ -268,7 +308,7 @@ export class TokenAnalyzer {
       };
     }
     
-    const consumed = consumption.tokensConsumed;
+    const consumed = consumption.creditsConsumed;
     const limit = this.budgetPerUserPerDay;
     
     // If no budget limit, always within budget

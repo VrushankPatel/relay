@@ -26,6 +26,27 @@ export interface Configuration {
 
   /** Logging configuration */
   logging: LoggingConfig;
+
+  /** Auth configuration for GitHub OAuth device flow */
+  auth: AuthConfig;
+
+  /** Models and credit multiplier configuration */
+  models: ModelsConfig;
+
+  /** Request deduplication configuration */
+  deduplication: DeduplicationConfig;
+
+  /** Prefix cache configuration */
+  prefixCache: PrefixCacheConfig;
+
+  /** Cache bypass configuration */
+  cacheBypass: CacheBypassConfig;
+
+  /** Provider configuration */
+  provider?: any;
+
+  /** Fuzzy cache configuration */
+  fuzzyCache?: any;
 }
 
 /**
@@ -68,6 +89,12 @@ export interface CacheConfig {
   
   /** Whether to enable gzip compression for cached responses */
   compressionEnabled: boolean;
+
+  /** Whether to enable encryption for cached data */
+  encryptionEnabled?: boolean;
+
+  /** Maximum number of prefix cache entries */
+  prefixCacheMaxEntries?: number;
 }
 
 /**
@@ -101,4 +128,68 @@ export interface SimilarityConfig {
 export interface SecurityConfig {
   /** Whether to encrypt cached data at rest using AES-256 */
   encryptCache: boolean;
+  
+  /** API key for authenticating clients to Relay */
+  apiKey?: string;
+}
+
+/**
+ * Auth configuration for GitHub OAuth device flow.
+ */
+export interface AuthConfig {
+  /** Path to store persisted token data */
+  tokenStoragePath: string;
+
+  /** Polling interval in milliseconds for device flow authorization */
+  deviceFlowPollInterval: number;
+
+  /** Margin in seconds before token expiry to trigger a refresh */
+  refreshMargin: number;
+}
+
+/** Per-model credit multipliers */
+export interface ModelMultiplier {
+  /** Credits per 1M input tokens */
+  input: number;
+
+  /** Credits per 1M output tokens */
+  output: number;
+}
+
+/**
+ * Models configuration.
+ */
+export interface ModelsConfig {
+  /** Credit multipliers keyed by model name */
+  creditMultipliers: Record<string, ModelMultiplier>;
+}
+
+/**
+ * Deduplication configuration.
+ */
+export interface DeduplicationConfig {
+  /** Time window in milliseconds for deduplication */
+  windowMs: number;
+
+  /** Maximum buffer size in bytes for streaming deduplication */
+  maxStreamBufferBytes: number;
+}
+
+/**
+ * Prefix cache configuration.
+ */
+export interface PrefixCacheConfig {
+  /** Maximum number of entries in the prefix cache */
+  maxEntries: number;
+}
+
+/**
+ * Cache bypass configuration.
+ */
+export interface CacheBypassConfig {
+  /** Whether to bypass cache when temperature is non-zero */
+  bypassOnNonZeroTemperature: boolean;
+
+  /** Whether to bypass cache when tools with side effects are present */
+  bypassOnToolsWithSideEffects: boolean;
 }

@@ -7,9 +7,7 @@
 // Request and authentication types
 export type {
   HTTPRequest,
-  CompletionRequestBody,
   AuthenticatedRequest,
-  AuthResult,
 } from './requests.js';
 
 // Cache types
@@ -19,17 +17,7 @@ export type {
   CacheStatistics,
 } from './cache.js';
 
-// Code context types
-export type {
-  CodeContext,
-  NormalizedContext,
-} from './context.js';
 
-// GitHub Copilot API types
-export type {
-  CopilotResponse,
-  Completion,
-} from './copilot.js';
 
 // Configuration types
 export type {
@@ -40,6 +28,12 @@ export type {
   SimilarityConfig,
   SecurityConfig,
   LoggingConfig,
+  AuthConfig,
+  ModelsConfig,
+  ModelMultiplier,
+  DeduplicationConfig,
+  PrefixCacheConfig,
+  CacheBypassConfig,
 } from './config.js';
 
 // Metrics types
@@ -54,3 +48,29 @@ export type {
   DiagnosticInfo,
   PoolStatistics,
 } from './health.js';
+
+// Chat types
+export type {
+  ChatMessage,
+  ToolCall,
+  ToolDefinition,
+  InternalChatRequest,
+  NormalizedChatRequest,
+  InternalChatResponse,
+  ChatChoice,
+  TokenUsage,
+  InternalStreamChunk,
+  StreamChoice,
+  ChatCacheEntry,
+} from './chat.js';
+
+// Auth types
+export type {
+  AuthStatus,
+  DeviceCodeResponse,
+  AccessTokenResponse,
+  AccessTokenErrorResponse,
+  CopilotTokenResponse,
+  PersistedTokenData,
+  EncryptedEnvelope,
+} from './auth.js';

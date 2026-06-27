@@ -1,71 +1,75 @@
-# Example configuration for GitHub Copilot Token Optimizer Proxy
-# Copy this file to config.yaml and adjust values as needed
+# Relay Configuration
+# Provider-Agnostic LLM Caching Proxy
 
 server:
-  # Port to listen on
-  port: 8080
-  
-  # Host to bind to (0.0.0.0 for all interfaces)
+  port: 3000
   host: '0.0.0.0'
-  
-  # Maximum concurrent requests
   maxConcurrentRequests: 100
-  
-  # Request timeout in milliseconds
-  requestTimeoutMs: 5000
+  requestTimeoutMs: 30000
 
+# ── Provider Configuration ──
+# Choose ONE provider as your upstream LLM backend.
+# Caching is most valuable for metered (pay-per-token) providers.
+provider:
+  # Option 1: OpenAI (recommended for cost savings)
+  type: openai
+  # apiKey: sk-...  # or set OPENAI_API_KEY env var
+  # baseUrl: https://api.openai.com  # default
+  # organization: org-...  # optional
+
+  # Option 2: Anthropic
+  # type: anthropic
+  # apiKey: sk-ant-...  # or set ANTHROPIC_API_KEY env var
+
+  # Option 3: Generic OpenAI-compatible backend
+  # type: generic
+  # baseUrl: http://localhost:11434  # e.g., Ollama
+  # apiKey: optional-key
+  # isMeteredPerToken: false  # set true if this backend charges per token
+
+  # Option 4: GitHub Copilot (requires organizational approval)
+  # type: copilot
+  # requireConsent: true  # default; see COMPLIANCE.md
+
+# ── Cache Configuration ──
 cache:
-  # Cache TTL in hours
-  ttlHours: 24
-  
-  # Maximum number of cache entries
   maxEntries: 10000
-  
-  # Enable gzip compression for cached responses
-  compressionEnabled: true
-  
-  # Optional Redis URL for persistent cache (null for in-memory only)
-  redisUrl: null
+  ttlHours: 24
 
+# ── Fuzzy Cache (opt-in, off by default) ──
+fuzzyCache:
+  enabled: false
+  maxTokenEditDistance: 3
+  maxEntries: 100
+  rapidEditWindowMs: 5000
+  rapidEditThreshold: 3
+
+# ── Prefix Cache ──
+prefixCache:
+  maxEntries: 500
+
+# ── Cache Bypass Rules ──
+cacheBypass:
+  bypassOnNonZeroTemperature: true
+  bypassOnToolsWithSideEffects: true
+
+# ── Deduplication ──
+deduplication:
+  windowMs: 1000
+  maxStreamBufferBytes: 10485760  # 10 MB
+
+# ── Token Budget ──
 tokens:
-  # Optional daily token budget per user (null for unlimited)
-  budgetPerUserPerDay: null
-  
-  # Enable token tracking
-  trackingEnabled: true
-  
-  # Warn when user reaches this percentage of budget
+  budgetPerUserPerDay: 1000000
   warningThresholdPercent: 90
 
-similarity:
-  # Enable fuzzy cache matching
-  enabled: true
-  
-  # Minimum similarity percentage for fuzzy matches
-  threshold: 85
-  
-  # Maximum number of entries to search for similarity
-  maxSearchEntries: 100
-
-security:
-  # Require API key authentication
-  apiKeyRequired: true
-  
-  # Encrypt cached data at rest
-  encryptCache: true
-  
-  # Only allow HTTPS for GitHub Copilot API
-  httpsOnly: true
-  
-  # API key for client authentication (set via environment variable in production)
-  # apiKey: 'your-secret-api-key-here'
-  
-  # Encryption secret for cache encryption (set via environment variable in production)
-  # encryptionSecret: 'your-encryption-secret-here'
-
+# ── Logging ──
 logging:
-  # Log level: DEBUG, INFO, WARN, ERROR
-  level: 'INFO'
-  
-  # Pretty print logs (disable in production)
-  prettyPrint: true
+  level: info
+  prettyPrint: false
+
+# ── Security ──
+security:
+  # API key that clients must send to authenticate with Relay
+  # apiKey: your-relay-api-key
+  encryptCache: false

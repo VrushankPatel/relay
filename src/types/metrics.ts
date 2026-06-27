@@ -31,6 +31,15 @@ export interface MetricsSummary {
   
   /** Average number of requests processed per second */
   requestsPerSecond: number;
+
+  /** Total credits saved by cache hits */
+  creditsSavedByCache: number;
+
+  /** Total credits saved by request deduplication */
+  creditsSavedByDedup: number;
+
+  /** Credits consumed broken down by model name */
+  creditsConsumedByModel: Record<string, number>;
 }
 
 

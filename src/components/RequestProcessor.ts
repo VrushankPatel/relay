@@ -1,187 +1,82 @@
-/**
- * Request Processor component for the GitHub Copilot Token Optimizer Proxy.
- * 
- * This component extracts code context from completion requests, normalizes
- * the context for consistent hashing, and generates context hashes for cache lookups.
- */
-
 import crypto from 'crypto';
-import { CodeContext, NormalizedContext } from '../types/context.js';
-import { CompletionRequestBody } from '../types/requests.js';
-
-const MAX_PRECEDING_CHARS = 500;
-const MAX_FOLLOWING_CHARS = 100;
-const TAB_WIDTH = 4;
+import { InternalChatRequest, NormalizedChatRequest } from '../types/chat.js';
 
 /**
- * Request Processor interface defining context extraction and hashing operations.
+ * Request Processor interface defining chat request normalization and hashing operations.
  */
 export interface IRequestProcessor {
   /**
-   * Extract code context from a completion request.
-   * @param req The completion request body
-   * @returns Extracted code context
+   * Normalize an internal chat request.
+   * @param req The chat request to normalize
+   * @returns Normalized chat request with defaults filled
    */
-  extractContext(req: CompletionRequestBody): CodeContext;
-  
-  /**
-   * Normalize code context for consistent hashing.
-   * @param context The code context to normalize
-   * @returns Normalized context with standardized formatting
-   */
-  normalizeContext(context: CodeContext): NormalizedContext;
+  normalizeRequest(req: InternalChatRequest): NormalizedChatRequest;
   
   /**
    * Generate SHA-256 hash from normalized context.
-   * @param context The normalized context to hash
-   * @returns Hex-encoded SHA-256 hash string
+   * @param normalized The normalized chat request to hash
+   * @returns Object containing contextHash and prefixHash
    */
-  generateContextHash(context: NormalizedContext): string;
+  generateContextHash(normalized: NormalizedChatRequest): { contextHash: string; prefixHash: string | null };
 }
 
 /**
- * Implementation of the Request Processor.
+ * Implementation of the Request Processor for Chat API.
  */
 export class RequestProcessor implements IRequestProcessor {
   /**
-   * Extract code context from a completion request.
-   * 
-   * Extracts file type, language, cursor position, and surrounding content
-   * (up to 500 chars before cursor, 100 chars after cursor).
+   * Normalize an internal chat request by ensuring all fields have defined values.
    */
-  extractContext(req: CompletionRequestBody): CodeContext {
-    const { language, cursorPosition, fileContext } = req;
-    
-    // Extract file type from language (simple mapping for now)
-    const fileType = this.languageToFileType(language);
-    
-    // Extract preceding content (up to 500 characters before cursor)
-    const precedingContent = fileContext.slice(
-      Math.max(0, cursorPosition - MAX_PRECEDING_CHARS),
-      cursorPosition
-    );
-    
-    // Extract following content (up to 100 characters after cursor)
-    const followingContent = fileContext.slice(
-      cursorPosition,
-      Math.min(fileContext.length, cursorPosition + MAX_FOLLOWING_CHARS)
-    );
-    
+  normalizeRequest(req: InternalChatRequest): NormalizedChatRequest {
     return {
-      fileType,
-      precedingContent,
-      followingContent,
-      cursorPosition,
-      language,
+      model: req.model,
+      messages: req.messages,
+      temperature: req.temperature ?? 1.0,
+      top_p: req.top_p ?? 1.0,
+      max_tokens: req.max_tokens ?? 0,
+      presence_penalty: req.presence_penalty ?? 0,
+      frequency_penalty: req.frequency_penalty ?? 0,
+      stream: req.stream ?? false,
+      tools: req.tools,
     };
   }
   
   /**
-   * Normalize code context for consistent hashing.
-   * 
-   * Normalization rules:
-   * - Collapse multiple consecutive spaces to single space
-   * - Remove leading/trailing whitespace per line
-   * - Normalize line endings to LF
-   * - Preserve indentation structure
-   * - Convert tabs to 4-space equivalent
+   * Generate hashes for the chat request context.
+   * contextHash: Hash of all messages and parameters.
+   * prefixHash: Hash of all messages except the last one (useful for prefix matching), or null if only 1 message.
    */
-  normalizeContext(context: CodeContext): NormalizedContext {
-    return {
-      fileType: context.fileType,
-      precedingContent: this.normalizeWhitespace(context.precedingContent),
-      followingContent: this.normalizeWhitespace(context.followingContent),
-      language: context.language,
-    };
+  generateContextHash(normalized: NormalizedChatRequest): { contextHash: string; prefixHash: string | null } {
+    const contextHash = this.createHashForMessages(normalized, normalized.messages);
+    
+    let prefixHash: string | null = null;
+    if (normalized.messages.length > 1) {
+      const prefixMessages = normalized.messages.slice(0, -1);
+      prefixHash = this.createHashForMessages(normalized, prefixMessages);
+    }
+    
+    return { contextHash, prefixHash };
   }
   
   /**
-   * Generate SHA-256 hash from normalized context.
-   * 
-   * Concatenates file type, language, preceding content, and following content
-   * with '||' delimiter, then computes SHA-256 hash.
+   * Helper method to create a hash for a specific set of messages and parameters.
    */
-  generateContextHash(context: NormalizedContext): string {
+  private createHashForMessages(normalized: NormalizedChatRequest, messages: { role: string; content: string }[]): string {
+    const messagesString = messages.map(m => `${m.role}:${m.content}`).join('\n');
+    
     const components = [
-      context.fileType,
-      context.language,
-      context.precedingContent,
-      context.followingContent,
+      normalized.model,
+      messagesString,
+      normalized.temperature.toString(),
+      normalized.top_p.toString(),
+      normalized.max_tokens.toString(),
+      normalized.presence_penalty.toString(),
+      normalized.frequency_penalty.toString()
     ];
     
     const concatenated = components.join('||');
     const hash = crypto.createHash('sha256');
     hash.update(concatenated, 'utf8');
     return hash.digest('hex');
-  }
-  
-  /**
-   * Normalize whitespace in a string according to requirement 2.3.
-   * 
-   * - Normalize line endings to LF
-   * - Convert tabs to 4-space equivalent
-   * - Remove leading/trailing whitespace per line
-   * - Collapse multiple consecutive spaces to single space (preserving indentation)
-   * 
-   * @param content The content to normalize
-   * @returns Normalized content
-   */
-  private normalizeWhitespace(content: string): string {
-    // Step 1: Normalize line endings to LF
-    let normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    
-    // Step 2: Convert tabs to 4-space equivalent
-    normalized = normalized.replace(/\t/g, ' '.repeat(TAB_WIDTH));
-    
-    // Step 3: Process line by line to preserve structure
-    const lines = normalized.split('\n');
-    const normalizedLines = lines.map((line) => {
-      // Remove trailing whitespace
-      line = line.replace(/\s+$/g, '');
-      
-      // Separate leading whitespace (indentation) from content
-      const leadingMatch = line.match(/^(\s*)(.*)/);
-      if (!leadingMatch) return line;
-      
-      const [, leading, content] = leadingMatch;
-      
-      // Preserve indentation but collapse multiple spaces in content
-      const normalizedContent = content.replace(/\s+/g, ' ');
-      
-      return leading + normalizedContent;
-    });
-    
-    // Step 4: Remove trailing empty lines
-    while (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1].trim() === '') {
-      normalizedLines.pop();
-    }
-    
-    // Step 5: Join lines back together
-    return normalizedLines.join('\n');
-  }
-  
-  /**
-   * Map language to file type extension.
-   * @param language Programming language name
-   * @returns File extension
-   */
-  private languageToFileType(language: string): string {
-    const mapping: Record<string, string> = {
-      'typescript': '.ts',
-      'javascript': '.js',
-      'python': '.py',
-      'java': '.java',
-      'csharp': '.cs',
-      'cpp': '.cpp',
-      'c': '.c',
-      'go': '.go',
-      'rust': '.rs',
-      'ruby': '.rb',
-      'php': '.php',
-      'swift': '.swift',
-      'kotlin': '.kt',
-    };
-    
-    return mapping[language.toLowerCase()] || `.${language}`;
   }
 }

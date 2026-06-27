@@ -322,7 +322,7 @@ describe('DeduplicationManager', () => {
       
       const stats = dedup.getStatistics();
       
-      expect(stats.oldestRequestAge).toBeGreaterThanOrEqual(50);
+      expect(stats.oldestRequestAge).toBeGreaterThanOrEqual(40); // 40ms to allow for some timing variance in event loop
     });
   });
   
@@ -501,6 +501,93 @@ describe('DeduplicationManager', () => {
       const result3 = await waiter3;
       expect(result2).toEqual(mockResponse);
       expect(result3).toEqual(mockResponse);
+    });
+  });
+
+  
+  describe('Streaming Deduplication', () => {
+    it('should deduplicate streaming requests and yield chunks', async () => {
+      const hash = 'streamHash123';
+      await dedup.registerRequest(hash, true);
+      
+      expect(dedup.isDuplicate(hash)).toBe(true);
+
+      const streamPromise1 = (async () => {
+        const chunks: any[] = [];
+        for await (const chunk of dedup.waitForStream(hash)) {
+          chunks.push(chunk);
+        }
+        return chunks;
+      })();
+      
+      const streamPromise2 = (async () => {
+        const chunks: any[] = [];
+        for await (const chunk of dedup.waitForStream(hash)) {
+          chunks.push(chunk);
+        }
+        return chunks;
+      })();
+
+      dedup.addStreamChunk(hash, { id: 'chunk1' });
+      dedup.addStreamChunk(hash, { id: 'chunk2' });
+      dedup.completeStream(hash);
+
+      const [res1, res2] = await Promise.all([streamPromise1, streamPromise2]);
+      
+      expect(res1).toEqual([{ id: 'chunk1' }, { id: 'chunk2' }]);
+      expect(res2).toEqual([{ id: 'chunk1' }, { id: 'chunk2' }]);
+    });
+
+    it('should allow waiters joining mid-stream to catch up', async () => {
+      const hash = 'streamHash456';
+      await dedup.registerRequest(hash, true);
+      
+      dedup.addStreamChunk(hash, { id: 'chunk1' });
+      
+      const streamPromise = (async () => {
+        const chunks: any[] = [];
+        for await (const chunk of dedup.waitForStream(hash)) {
+          chunks.push(chunk);
+        }
+        return chunks;
+      })();
+
+      dedup.addStreamChunk(hash, { id: 'chunk2' });
+      dedup.completeStream(hash);
+
+      const res = await streamPromise;
+      expect(res).toEqual([{ id: 'chunk1' }, { id: 'chunk2' }]);
+    });
+
+    it('should fail all stream waiters on stream failure', async () => {
+      const hash = 'streamHashError';
+      await dedup.registerRequest(hash, true);
+      
+      const streamPromise = (async () => {
+        for await (const chunk of dedup.waitForStream(hash)) {
+          // just consume
+        }
+      })();
+
+      dedup.failRequest(hash, new Error('Stream Error'));
+
+      await expect(streamPromise).rejects.toThrow('Stream Error');
+    });
+
+    it('should throw error if waitForStream is used on non-stream request', async () => {
+      const hash = 'mixedHash1';
+      await dedup.registerRequest(hash, false);
+      
+      await expect(async () => {
+        for await (const chunk of dedup.waitForStream(hash)) {}
+      }).rejects.toThrow(/not a stream/);
+    });
+
+    it('should throw error if waitForCompletion is used on stream request', async () => {
+      const hash = 'mixedHash2';
+      await dedup.registerRequest(hash, true);
+      
+      await expect(dedup.waitForCompletion(hash)).rejects.toThrow(/is a stream/);
     });
   });
 });

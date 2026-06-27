@@ -1,9 +1,10 @@
 import https from 'https';
+import http from 'http';
 import { createChildLogger } from '../utils/logger.js';
-import type { CopilotResponse } from '../types/copilot.js';
 import type { PoolStatistics } from '../types/health.js';
+import type { InternalChatRequest, InternalChatResponse } from '../types/chat.js';
+import type { IProvider } from '../providers/types.js';
 
-const COPILOT_API_URL = 'https://api.githubcopilot.com/v1/completions';
 const MAX_RETRIES = 3;
 const BASE_RETRY_MS = 100;
 const CIRCUIT_BREAKER_THRESHOLD = 5;
@@ -14,9 +15,10 @@ const MAX_SOCKETS = 20;
 type CircuitState = 'closed' | 'open' | 'half-open';
 
 export interface IRequestForwarder {
-  forward(body: Record<string, unknown>, copilotToken: string): Promise<CopilotResponse>;
+  forward(req: InternalChatRequest, provider: IProvider): Promise<InternalChatResponse>;
   checkHealth(): Promise<boolean>;
   getPoolStats(): PoolStatistics;
+  destroy(): void;
 }
 
 export class RequestForwarder implements IRequestForwarder {
@@ -40,7 +42,7 @@ export class RequestForwarder implements IRequestForwarder {
     this.logger.info({ maxSockets: MAX_SOCKETS }, 'Request Forwarder initialized');
   }
 
-  async forward(body: Record<string, unknown>, copilotToken: string): Promise<CopilotResponse> {
+  async forward(req: InternalChatRequest, provider: IProvider): Promise<InternalChatResponse> {
     this.checkCircuitBreaker();
 
     if (this.circuitState === 'open') {
@@ -48,6 +50,10 @@ export class RequestForwarder implements IRequestForwarder {
     }
 
     let lastError: Error | null = null;
+    let did401Retry = false;
+
+    // Use the provider to transform the request body
+    const body = provider.transformRequestBody(req);
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -57,8 +63,12 @@ export class RequestForwarder implements IRequestForwarder {
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
+        const headers = await provider.getHeaders();
+        const endpointUrl = provider.getEndpointUrl();
+
         const startTime = Date.now();
-        const response = await this.sendRequest(body, copilotToken);
+        const rawResponse = await this.performRequest(endpointUrl, headers, body);
+        const response = provider.parseResponse(rawResponse);
         const latency = Date.now() - startTime;
 
         this.totalRequests++;
@@ -72,11 +82,19 @@ export class RequestForwarder implements IRequestForwarder {
         }
 
         return response;
-      } catch (error) {
+      } catch (error: any) {
         lastError = error instanceof Error ? error : new Error(String(error));
         this.totalRequests++;
 
-        const isTransient = this.isTransientError(lastError);
+        if (error.statusCode === 401 && !did401Retry) {
+          this.logger.warn('Received 401 Unauthorized, refreshing credentials and retrying once');
+          await provider.refreshCredentials();
+          did401Retry = true;
+          attempt--; // Retry this attempt
+          continue;
+        }
+
+        const isTransient = this.isTransientError(lastError) || (error.statusCode && error.statusCode >= 500);
         if (!isTransient || attempt === MAX_RETRIES) {
           break;
         }
@@ -100,15 +118,7 @@ export class RequestForwarder implements IRequestForwarder {
   }
 
   async checkHealth(): Promise<boolean> {
-    try {
-      await this.sendRequest(
-        { prompt: 'test', language: 'plaintext', cursorPosition: 0, fileContext: '' },
-        '',
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    return true;
   }
 
   getPoolStats(): PoolStatistics {
@@ -128,55 +138,74 @@ export class RequestForwarder implements IRequestForwarder {
     };
   }
 
-  private async sendRequest(
-    body: Record<string, unknown>,
-    copilotToken: string,
-  ): Promise<CopilotResponse> {
-    const url = new URL(COPILOT_API_URL);
+  private async performRequest(
+    apiUrl: string,
+    headers: Record<string, string>,
+    body: Record<string, unknown>
+  ): Promise<unknown> {
+    const url = new URL(apiUrl);
 
     return new Promise((resolve, reject) => {
+      let upstreamReq: http.ClientRequest;
       const timeoutId = setTimeout(() => {
-        req.destroy(new Error('Request timeout'));
-        reject(new Error('Copilot API request timed out'));
+        if (upstreamReq) upstreamReq.destroy(new Error('Request timeout'));
+        reject(new Error('API request timed out'));
       }, REQUEST_TIMEOUT_MS);
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (copilotToken) {
-        headers['Authorization'] = `Bearer ${copilotToken}`;
-      }
 
       const options: https.RequestOptions = {
         hostname: url.hostname,
-        port: 443,
+        port: url.port ? parseInt(url.port) : (url.protocol === 'https:' ? 443 : 80),
         path: url.pathname + url.search,
         method: 'POST',
         headers,
         agent: this.agent,
       };
 
-      const req = https.request(options, (res) => {
+      const transport = url.protocol === 'https:' ? https : require('http');
+
+      upstreamReq = transport.request(options, (upstreamRes: any) => {
+        const statusCode = upstreamRes.statusCode || 500;
+
+        if (statusCode >= 400) {
+          let data = '';
+          upstreamRes.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+          upstreamRes.on('end', () => {
+            clearTimeout(timeoutId);
+            const err: any = new Error(`HTTP ${statusCode}: ${data}`);
+            err.statusCode = statusCode;
+            reject(err);
+          });
+          upstreamRes.on('error', (err: Error) => {
+            clearTimeout(timeoutId);
+            reject(err);
+          });
+          return;
+        }
+
         let data = '';
-        res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
-        res.on('end', () => {
+        upstreamRes.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        upstreamRes.on('end', () => {
           clearTimeout(timeoutId);
           try {
             const parsed = JSON.parse(data);
-            resolve(parsed as CopilotResponse);
-          } catch {
-            reject(new Error(`Copilot API returned non-JSON: ${data.substring(0, 200)}`));
+            resolve(parsed);
+          } catch (err) {
+            reject(new Error(`API returned non-JSON: ${data.substring(0, 200)}`));
           }
+        });
+        upstreamRes.on('error', (err: Error) => {
+          clearTimeout(timeoutId);
+          reject(err);
         });
       });
 
-      req.on('error', (error) => {
+      upstreamReq.on('error', (error: any) => {
         clearTimeout(timeoutId);
         reject(error);
       });
 
-      req.write(JSON.stringify(body));
-      req.end();
+      upstreamReq.write(JSON.stringify(body));
+      upstreamReq.end();
     });
   }
 

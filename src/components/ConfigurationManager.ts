@@ -30,6 +30,29 @@ const DEFAULT_CONFIG: Configuration = {
     level: 'INFO',
     prettyPrint: true,
   },
+  auth: {
+    tokenStoragePath: '~/.relay/tokens.json',
+    deviceFlowPollInterval: 5,
+    refreshMargin: 60,
+  },
+  models: {
+    creditMultipliers: {
+      'gpt-4o': { input: 1.5, output: 5 },
+      'gpt-3.5-turbo': { input: 0.5, output: 1.5 },
+      'claude-3-5-sonnet': { input: 3, output: 15 },
+    },
+  },
+  deduplication: {
+    windowMs: 1000,
+    maxStreamBufferBytes: 1024 * 1024,
+  },
+  prefixCache: {
+    maxEntries: 5000,
+  },
+  cacheBypass: {
+    bypassOnNonZeroTemperature: true,
+    bypassOnToolsWithSideEffects: true,
+  },
 };
 
 export interface IConfigurationManager {
@@ -197,6 +220,21 @@ export class ConfigurationManager implements IConfigurationManager {
     }
     if (parsed.logging) {
       config.logging = { ...config.logging, ...parsed.logging };
+    }
+    if (parsed.auth) {
+      config.auth = { ...config.auth, ...parsed.auth };
+    }
+    if (parsed.models) {
+      config.models = { ...config.models, ...parsed.models };
+    }
+    if (parsed.deduplication) {
+      config.deduplication = { ...config.deduplication, ...parsed.deduplication };
+    }
+    if (parsed.prefixCache) {
+      config.prefixCache = { ...config.prefixCache, ...parsed.prefixCache };
+    }
+    if (parsed.cacheBypass) {
+      config.cacheBypass = { ...config.cacheBypass, ...parsed.cacheBypass };
     }
 
     return config;

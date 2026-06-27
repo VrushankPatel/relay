@@ -1,238 +1,169 @@
-# Requirements Document
+# Requirements Document — Relay (Revised Scope)
 
 ## Introduction
 
-The GitHub Copilot Token Optimizer Proxy is a service that intercepts communication between users and GitHub Copilot to reduce token consumption through intelligent caching, deduplication, and optimization strategies. The proxy aims to maintain the quality of Copilot responses while significantly reducing API token usage and associated costs.
+Relay is a caching and deduplicating gateway in front of GitHub Copilot's Chat and Agent backend. It presents an OpenAI‑compatible API (and optionally an Anthropic‑compatible one) so that any tool‑calling agent, CLI, or custom script can use a Copilot subscription without consuming redundant tokens. Relay performs its own GitHub OAuth Device Flow to obtain credentials rather than depending on an already‑running IDE session.
+
+**Why this scope exists.** As of GitHub's June 2026 billing change, code completions and Next‑Edit suggestions are unlimited and unmetered. The only surfaces billed by GitHub AI Credits are **Chat, Agent mode, Copilot CLI, code review, and cloud agent sessions**. At the same time, the `debug.overrideProxyUrl` setting historically used to intercept inline completions was never a supported production feature and is being removed. A proxy that only intercepts completions has no token‑cost value and an increasingly unreliable interception path.
+
+Relay therefore targets the billed surfaces directly, with credential management built in.
 
 ## Glossary
 
-- **Proxy_Service**: The intermediary service that sits between the user's IDE and GitHub Copilot API
-- **Token_Analyzer**: Component that analyzes and measures token consumption in requests and responses
-- **Cache_Manager**: Component responsible for storing and retrieving cached Copilot responses
-- **Request_Processor**: Component that processes incoming requests before forwarding to Copilot
-- **Response_Optimizer**: Component that optimizes Copilot responses before returning to the user
-- **Metrics_Collector**: Component that tracks and reports token savings and performance metrics
-- **Context_Hash**: A unique identifier generated from the code context to identify similar requests
-- **Token_Budget**: The maximum number of tokens allocated for a request or time period
-- **Cache_Entry**: A stored Copilot response with its associated context and metadata
-- **Completion_Request**: A request from the IDE for code completion suggestions
-- **Valid_Response**: A Copilot response that meets quality and freshness criteria
+- **Device Flow** — GitHub OAuth device authorization grant; user visits a URL and enters a code to authorize the application.
+- **Copilot Token** — Short‑lived session token issued by GitHub's token‑exchange endpoint that authenticates requests to `api.githubcopilot.com`.
+- **GitHub Token** — Long‑lived OAuth access token (or, for headless use, a fine‑grained personal access token) used to refresh the Copilot session token.
+- **Compatibility Layer** — Component that translates between Relay's internal chat‑request format and OpenAI‑ or Anthropic‑shaped request/response schemas.
+- **Context Hash** — Deterministic hash of a normalised message array plus model plus sampling parameters, used as the cache key.
+- **Prefix Cache** — Cache for the static portion of a conversation (system prompt, tool schemas) that is identical across many requests.
+- **Exact Cache** — Cache that returns a hit only when the full context hash matches.
+- **Deduplication** — Coalescing of concurrent identical in‑flight requests so only one upstream call is made.
+- **In‑Flight Request** — A request that has been sent upstream and is awaiting a response.
+- **AI Credits** — GitHub's usage‑billing unit; 1 credit = $0.01 USD as of June 2026.
+- **Token Refresh** — Periodic re‑authentication to obtain a new Copilot session token before the current one expires.
 
 ## Requirements
 
-### Requirement 1: Request Interception and Forwarding
+### R1: GitHub OAuth Device Flow Login
 
-**User Story:** As a developer, I want the proxy to intercept my Copilot requests transparently, so that I can continue using Copilot without changing my workflow.
+**User Story:** As an operator, I want to authenticate Relay with my GitHub account using a simple terminal command, so that I do not need to manually provision or rotate credentials.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN a Completion_Request is received from the IDE, THE Proxy_Service SHALL extract the request metadata and context
-2. WHEN a Completion_Request is received, THE Proxy_Service SHALL forward the request to GitHub Copilot API within 50 milliseconds if no cache match exists
-3. WHEN a response is received from GitHub Copilot API, THE Proxy_Service SHALL forward the response to the requesting IDE within 20 milliseconds
-4. THE Proxy_Service SHALL maintain the original request and response format without modification
-5. IF the GitHub Copilot API returns an error, THEN THE Proxy_Service SHALL forward the error to the IDE with the original error code and message
+1. WHEN the operator runs `relay login`, THE Relay CLI SHALL request a device code from GitHub's OAuth device‑authorisation endpoint.
+2. WHEN a device code is received, THE Relay CLI SHALL display `user_code` and `verification_uri` to the terminal.
+3. WHEN the operator enters the code at the displayed URI, THE Relay CLI SHALL poll GitHub's token endpoint until the access token is granted or the device code expires.
+4. IF the device code expires before the operator authorises the application, THEN THE Relay CLI SHALL print an error message and exit with a non‑zero code.
+5. WHEN an access token is received, THE Relay CLI SHALL exchange it for a Copilot session token via the GitHub Copilot token‑exchange endpoint.
+6. WHEN the Copilot session token is received, THE Relay CLI SHALL persist the long‑lived GitHub access token (encrypted at rest using AES‑256‑GCM) to a configurable token storage path.
+7. THE Relay CLI SHALL complete the full login flow without requiring an already‑running IDE or browser extension.
 
-### Requirement 2: Context Analysis and Hashing
+### R2: Token Refresh and Expiry Handling
 
-**User Story:** As a system administrator, I want the proxy to identify similar code contexts, so that duplicate requests can be efficiently cached.
+**User Story:** As an operator, I want Relay to automatically refresh the Copilot session token before it expires, so that the proxy stays online without manual intervention.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN a Completion_Request is received, THE Request_Processor SHALL extract the code context including file content, cursor position, and language
-2. WHEN code context is extracted, THE Request_Processor SHALL generate a Context_Hash using SHA-256 algorithm
-3. THE Request_Processor SHALL normalize whitespace and formatting before generating Context_Hash
-4. WHEN generating Context_Hash, THE Request_Processor SHALL include file type, preceding 500 characters, and following 100 characters
-5. THE Request_Processor SHALL complete context analysis and hashing within 10 milliseconds
+1. WHEN Relay starts, THE AuthManager SHALL check whether a persisted GitHub access token exists.
+2. IF a persisted token exists, THE AuthManager SHALL exchange it for a fresh Copilot session token.
+3. WHEN the Copilot session token is obtained, THE AuthManager SHALL schedule a refresh timer for `(refresh_in - 60) seconds` before the token's reported expiry.
+4. WHEN the refresh timer fires, THE AuthManager SHALL re‑exchange the GitHub token for a new Copilot session token and reset the timer.
+5. IF the token‑exchange endpoint returns an error (e.g. the GitHub token has been revoked), THEN THE AuthManager SHALL log a warning and fall back to serving cached responses only (degraded mode).
+6. IF the token‑exchange endpoint still fails after 3 consecutive refresh attempts, THEN THE AuthManager SHALL require the operator to re‑run `relay login`.
+7. WHEN the operator runs `relay login` while the proxy is running, THE AuthManager SHALL reload the new token without restarting the server.
 
-### Requirement 3: Response Caching
+### R3: OpenAI‑Compatible Chat Endpoint
 
-**User Story:** As a developer, I want identical or similar requests to return cached responses, so that token consumption is reduced without sacrificing response quality.
+**User Story:** As a user, I want to point an OpenAI‑compatible client at Relay's `/v1/chat/completions` endpoint, so that I can use any tool‑calling agent or library that speaks the OpenAI Chat API.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN a Valid_Response is received from GitHub Copilot API, THE Cache_Manager SHALL store the response with its Context_Hash and timestamp
-2. WHEN a Completion_Request is received, THE Cache_Manager SHALL check for matching Cache_Entry based on Context_Hash
-3. IF a Cache_Entry exists and is less than 24 hours old, THEN THE Cache_Manager SHALL return the cached response without calling GitHub Copilot API
-4. WHEN a Cache_Entry is older than 24 hours, THE Cache_Manager SHALL mark it as expired and allow the request to proceed to GitHub Copilot API
-5. THE Cache_Manager SHALL support storage of at least 10,000 Cache_Entry items
-6. WHEN cache capacity is reached, THE Cache_Manager SHALL evict the least recently used Cache_Entry
-7. THE Cache_Manager SHALL complete cache lookup operations within 5 milliseconds
+1. WHEN a client sends a `POST /v1/chat/completions` request, THE CompatibilityLayer SHALL accept the request and parse it into Relay's internal chat‑request format.
+2. WHEN the request is parsed, THE CompatibilityLayer SHALL forward it to the request processor for normalisation, caching, and deduplication checks.
+3. WHEN the upstream Copilot API responds, THE CompatibilityLayer SHALL translate the response back into the OpenAI `chat.completions` schema and return it to the client.
+4. The endpoint SHALL support the following OpenAI request fields: `model`, `messages`, `temperature`, `top_p`, `max_tokens`, `stream`, `stop`, `presence_penalty`, `frequency_penalty`, `user`.
+5. WHEN the client requests streaming (`stream: true`), THE Relay SHALL stream response tokens back in Server‑Sent Events (SSE) format conforming to the OpenAI streaming schema.
+6. WHEN the client connects with an unsupported model name, THE Relay SHALL reject the request with HTTP 400 and a clear error message listing supported models.
+7. THE Relay SHALL NOT require the client to send any proprietary headers beyond standard OpenAI Chat API fields.
 
-### Requirement 4: Token Counting and Analysis
+### R4: Request Deduplication for Concurrent Chat Calls
 
-**User Story:** As a system administrator, I want to track token consumption for all requests, so that I can measure the effectiveness of the optimization.
+**User Story:** As a user running an agentic workflow that fans out several sub‑agent calls with the same prompt, I want Relay to coalesce those calls into a single upstream request, so that AI Credits are not multiplied.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN a Completion_Request is sent to GitHub Copilot API, THE Token_Analyzer SHALL count the tokens in the request prompt
-2. WHEN a response is received from GitHub Copilot API, THE Token_Analyzer SHALL count the tokens in the response
-3. THE Token_Analyzer SHALL use the same tokenization method as GitHub Copilot (tiktoken cl100k_base)
-4. WHEN a cached response is returned, THE Token_Analyzer SHALL record the tokens saved by not calling the API
-5. THE Token_Analyzer SHALL calculate cumulative token savings since service start
-6. THE Token_Analyzer SHALL complete token counting within 5 milliseconds per request
+1. WHEN two or more requests with an identical context hash arrive within the deduplication window, THE DedupManager SHALL forward only the first to the upstream API.
+2. WHEN a duplicate request is detected, THE DedupManager SHALL suspend the duplicate's response until the primary request completes.
+3. WHEN the primary request completes, THE DedupManager SHALL deliver the same response (or error stream) to all suspended duplicates.
+4. IF the primary request fails, THE DedupManager SHALL promote the next waiter to primary and re‑attempt the upstream call.
+5. THE DedupManager SHALL track in‑flight requests by context hash and clean up entries after the request completes or all waiters are served.
+6. THE DedupManager SHALL support deduplication for both streaming and non‑streaming requests, closing duplicate streams when the primary stream ends.
 
-### Requirement 5: Request Deduplication
+### R5: Exact and Prefix‑Based Caching
 
-**User Story:** As a developer, I want the proxy to suppress duplicate simultaneous requests, so that identical requests fired in quick succession don't consume extra tokens.
+**User Story:** As an operator, I want repeated identical chat requests and repeated static prefixes (system prompt, tool schemas) to be served from cache, so that AI Credits are not consumed for boilerplate.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN multiple Completion_Request items with identical Context_Hash are received within 1 second, THE Request_Processor SHALL process only the first request
-2. WHEN a duplicate request is detected, THE Request_Processor SHALL queue subsequent requests until the first completes
-3. WHEN the first request completes, THE Request_Processor SHALL return the same response to all queued duplicate requests
-4. THE Request_Processor SHALL track in-flight requests by Context_Hash
-5. IF the first request fails, THEN THE Request_Processor SHALL retry with the next queued request
+1. WHEN an upstream response is received, THE CacheManager SHALL store it keyed by the full context hash.
+2. WHEN a subsequent request arrives with a matching full context hash, THE CacheManager SHALL return the cached response without calling the upstream API.
+3. WHEN the system prompt and tool‑schema portion of the messages array is identical to a previously cached prefix, THE CacheManager SHALL return the cached prefix response, appending only the variable tail (the conversation history after the prefix).
+4. THE CacheManager SHALL support configurable TTL for cache entries (default 24 hours).
+5. THE CacheManager SHALL complete cache lookup within 5 ms (p95).
+6. THE CacheManager SHALL support optional AES‑256‑GCM encryption of cached data at rest and PBKDF2 key derivation.
+7. THE CacheManager SHALL be in‑memory with LRU eviction; Redis SHOULD be supported as an optional distributed backend.
 
-### Requirement 6: Context Similarity Detection
+### R6: Per‑Model Credit Tracking
 
-**User Story:** As a developer, I want the proxy to recognize similar but not identical contexts, so that near-match caching can further reduce token usage.
+**User Story:** As an operator, I want to see how many AI Credits are being consumed per model, so that I can understand which models drive cost.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN no exact Cache_Entry match exists, THE Cache_Manager SHALL search for similar Cache_Entry items using fuzzy matching
-2. THE Cache_Manager SHALL calculate similarity score between Context_Hash values using Levenshtein distance on normalized context
-3. IF a Cache_Entry has a similarity score above 85 percent, THEN THE Cache_Manager SHALL return the cached response
-4. WHEN returning a similar Cache_Entry, THE Cache_Manager SHALL log the similarity score
-5. WHERE similarity matching is enabled, THE Cache_Manager SHALL complete similarity search within 15 milliseconds
+1. WHEN a request is forwarded upstream and a response is received, THE TokenAnalyzer SHALL count input tokens, output tokens, and cached tokens using tiktoken (cl100k_base for GPT‑class models; fallback for others).
+2. THE TokenAnalyzer SHALL multiply counted tokens by the model's published AI‑Credit multiplier and record the result as credits consumed.
+3. THE TokenAnalyzer SHALL expose per‑model cumulative credit consumption via the `/metrics` endpoint in Prometheus format.
+4. THE TokenAnalyzer SHALL emit a log line after each request with model name, input tokens, output tokens, and estimated credits consumed.
+5. THE per‑model credit‑multiplier table SHALL be configurable (see `config.example.yaml`) so operators can update it when GitHub publishes new rates.
 
-### Requirement 7: Response Size Optimization
+### R7: Streaming Response Support
 
-**User Story:** As a system administrator, I want the proxy to optimize response size, so that bandwidth and storage are minimized.
+**User Story:** As a user, I want Relay to support streaming chat responses so that I can see tokens as they are generated, matching the OpenAI streaming contract.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHEN storing a Cache_Entry, THE Response_Optimizer SHALL compress the response data using gzip compression
-2. WHEN retrieving a Cache_Entry, THE Response_Optimizer SHALL decompress the response before returning to the IDE
-3. THE Response_Optimizer SHALL achieve at least 40 percent compression ratio on average
-4. WHEN a response contains multiple completion suggestions, THE Response_Optimizer SHALL deduplicate identical suggestions
-5. THE Response_Optimizer SHALL complete compression and decompression within 10 milliseconds
+1. WHEN the client sends `stream: true`, THE CompatibilityLayer SHALL pass the streaming flag to the upstream Copilot API.
+2. WHEN the upstream returns a stream, THE CompatibilityLayer SHALL translate each chunk into the OpenAI SSE format (`data: {"choices":[{"delta":{"content":"..."}}]}`) and forward it to the client.
+3. WHEN the stream ends, THE CompatibilityLayer SHALL send `data: [DONE]` to signal completion.
+4. THE caching and deduplication subsystems SHALL correctly handle streaming responses: cache the complete response for non‑streaming re‑play, and splice the cached response into a synthetic stream for streaming replays.
+5. IF the upstream stream errors mid‑response, THE CompatibilityLayer SHALL send the error as a well‑formed SSE error chunk and close the connection.
 
-### Requirement 8: Token Budget Management
+### R8: Graceful Behaviour on Invalid or Revoked Tokens
 
-**User Story:** As a system administrator, I want to set token consumption limits, so that costs remain within budget.
+**User Story:** As an operator, I want Relay to stop sending requests to the upstream API and inform me clearly when the Copilot token is invalid or revoked, rather than returning confusing errors to clients.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. WHERE a Token_Budget is configured, THE Proxy_Service SHALL track token consumption per user per day
-2. WHEN a user's daily token consumption reaches 90 percent of Token_Budget, THE Proxy_Service SHALL log a warning
-3. IF a user exceeds their Token_Budget, THEN THE Proxy_Service SHALL return cached responses only and reject new API calls with an error message
-4. THE Proxy_Service SHALL reset daily Token_Budget counters at midnight UTC
-5. WHERE Token_Budget is not configured, THE Proxy_Service SHALL allow unlimited token consumption
+1. WHEN the upstream API returns HTTP 401 or HTTP 403 for a forwarded request, THE AuthManager SHALL check whether the Copilot session token is still valid.
+2. IF the token is expired, THE AuthManager SHALL attempt an automatic refresh using the persisted GitHub token.
+3. IF the refresh succeeds, THE AuthManager SHALL retry the original request.
+4. IF the refresh fails, THE AuthManager SHALL enter **degraded mode**: serve cached responses only, return HTTP 502 with a clear error message for cache misses, and log the reason.
+5. WHEN in degraded mode due to token failure, THE AuthManager SHALL emit a health‑check warning so monitoring can alert the operator.
+6. WHEN the operator re‑runs `relay login` and provides fresh credentials while in degraded mode, THE AuthManager SHALL exit degraded mode and resume normal operation without restarting the server.
+7. IN ALL CASES, THE Relay SHALL NOT forward the client's request to the upstream API with an invalid or expired token.
 
-### Requirement 9: Metrics Collection and Reporting
+### R9: Client‑Facing API Compatibility
 
-**User Story:** As a system administrator, I want detailed metrics on token savings and performance, so that I can measure ROI and optimize configuration.
+**User Story:** As a user, I want Relay to expose its health, metrics, and diagnostics endpoints so that I can monitor and troubleshoot the service.
 
-#### Acceptance Criteria
+**Acceptance Criteria (EARS):**
 
-1. THE Metrics_Collector SHALL track the following metrics: total requests, cache hits, cache misses, tokens consumed, tokens saved, average response time
-2. WHEN a request is processed, THE Metrics_Collector SHALL update the relevant metric counters
-3. THE Metrics_Collector SHALL aggregate metrics per user, per hour, and per day
-4. THE Metrics_Collector SHALL expose metrics via HTTP endpoint in Prometheus format
-5. THE Metrics_Collector SHALL retain detailed metrics for 30 days
-6. THE Metrics_Collector SHALL provide real-time metrics with maximum 5 second staleness
+1. THE Relay SHALL expose `GET /health` returning HTTP 200 when all components are healthy and HTTP 503 when degraded.
+2. THE Relay SHALL expose `GET /metrics` in Prometheus exposition format.
+3. THE Relay SHALL expose `GET /diagnostics` returning configuration, cache statistics, connection‑pool state, and per‑model credit consumption.
+4. THE Relay SHALL expose `POST /cache/invalidate` to clear cache entries by user or globally.
 
-### Requirement 10: Configuration Management
+## Non‑Functional Requirements
 
-**User Story:** As a system administrator, I want to configure proxy behavior without restarting the service, so that I can tune optimization settings dynamically.
+**Performance:**
+- Cache lookup: < 5 ms (p95)
+- Request forwarding overhead: < 50 ms (p95) for non‑streaming, < 10 ms first‑token latency for streaming
+- Token analysis: < 5 ms (p95)
+- Total proxy overhead (non‑streaming): < 70 ms (p95)
 
-#### Acceptance Criteria
-
-1. THE Proxy_Service SHALL load configuration from a YAML file on startup
-2. THE Proxy_Service SHALL support the following configurable parameters: cache_ttl, cache_size, similarity_threshold, token_budget_per_user, enable_similarity_matching
-3. WHEN a configuration file is modified, THE Proxy_Service SHALL reload the configuration within 10 seconds
-4. WHEN configuration is reloaded, THE Proxy_Service SHALL apply new settings without dropping active connections
-5. IF configuration file contains invalid values, THEN THE Proxy_Service SHALL log an error and continue using previous valid configuration
-
-### Requirement 11: Health Monitoring and Diagnostics
-
-**User Story:** As a system administrator, I want health checks and diagnostic information, so that I can monitor service availability and troubleshoot issues.
-
-#### Acceptance Criteria
-
-1. THE Proxy_Service SHALL expose a health check endpoint at /health that returns HTTP 200 when healthy
-2. WHEN the health endpoint is called, THE Proxy_Service SHALL verify connectivity to GitHub Copilot API within 2 seconds
-3. THE Proxy_Service SHALL expose a diagnostics endpoint at /diagnostics that returns cache statistics, uptime, and configuration
-4. WHEN an error occurs, THE Proxy_Service SHALL log the error with timestamp, error type, and context
-5. THE Proxy_Service SHALL support log levels: DEBUG, INFO, WARN, ERROR
-6. WHERE log level is set to DEBUG, THE Proxy_Service SHALL log all request Context_Hash values and cache decisions
-
-### Requirement 12: Authentication and Security
-
-**User Story:** As a system administrator, I want secure authentication between IDE and proxy, so that unauthorized access is prevented.
-
-#### Acceptance Criteria
-
-1. THE Proxy_Service SHALL accept connections only from authenticated clients
-2. WHEN a connection is established, THE Proxy_Service SHALL verify the client API key
-3. THE Proxy_Service SHALL forward the user's GitHub Copilot authentication token to the GitHub Copilot API
-4. THE Proxy_Service SHALL encrypt all cached data at rest using AES-256 encryption
-5. THE Proxy_Service SHALL communicate with GitHub Copilot API over HTTPS only
-6. IF authentication fails, THEN THE Proxy_Service SHALL return HTTP 401 Unauthorized
-
-### Requirement 13: Concurrent Request Handling
-
-**User Story:** As a developer, I want the proxy to handle multiple simultaneous requests efficiently, so that I don't experience delays when multiple suggestions are requested.
-
-#### Acceptance Criteria
-
-1. THE Proxy_Service SHALL support at least 100 concurrent Completion_Request items
-2. WHEN processing concurrent requests, THE Proxy_Service SHALL maintain separate request contexts
-3. THE Proxy_Service SHALL use connection pooling with at least 20 connections to GitHub Copilot API
-4. WHEN concurrent requests exceed capacity, THE Proxy_Service SHALL queue requests with maximum wait time of 5 seconds
-5. IF a request waits longer than 5 seconds, THEN THE Proxy_Service SHALL return HTTP 503 Service Unavailable
-
-### Requirement 14: Cache Invalidation
-
-**User Story:** As a developer, I want the ability to invalidate cached responses, so that I can force fresh responses when code context changes significantly.
-
-#### Acceptance Criteria
-
-1. THE Proxy_Service SHALL expose a cache invalidation endpoint at /cache/invalidate
-2. WHEN the invalidation endpoint is called with a user identifier, THE Cache_Manager SHALL remove all Cache_Entry items for that user
-3. WHEN the invalidation endpoint is called without parameters, THE Cache_Manager SHALL remove all Cache_Entry items
-4. THE Cache_Manager SHALL complete cache invalidation within 500 milliseconds
-5. WHEN cache invalidation completes, THE Proxy_Service SHALL return a count of invalidated Cache_Entry items
-
-### Requirement 15: Graceful Degradation
-
-**User Story:** As a developer, I want the proxy to fail gracefully, so that I can continue using Copilot even when the proxy encounters issues.
-
-#### Acceptance Criteria
-
-1. IF the Cache_Manager fails, THEN THE Proxy_Service SHALL forward all requests directly to GitHub Copilot API
-2. IF the Token_Analyzer fails, THEN THE Proxy_Service SHALL continue processing requests without token tracking
-3. IF the Metrics_Collector fails, THEN THE Proxy_Service SHALL continue processing requests without metrics collection
-4. WHEN a component failure is detected, THE Proxy_Service SHALL log an error and continue operation
-5. THE Proxy_Service SHALL attempt to restart failed components every 60 seconds
-6. IF GitHub Copilot API is unavailable, THEN THE Proxy_Service SHALL return cached responses when available or return HTTP 502 Bad Gateway
-
-## Non-Functional Requirements
-
-### Performance
-
-- Cache lookup operations: < 5ms (p95)
-- Request forwarding overhead: < 50ms (p95)
-- Token analysis: < 5ms (p95)
-- Total proxy overhead: < 70ms (p95)
-
-### Scalability
-
+**Scalability:**
 - Support 100 concurrent users
-- Support 1000 requests per minute
-- Cache capacity: 10,000 entries minimum
-- Storage efficiency: 40% compression ratio
+- Support 500 chat requests per minute
+- Cache capacity: 10 000 entries minimum (configurable)
 
-### Reliability
+**Security:**
+- AES‑256‑GCM encryption for cached data at rest
+- PBKDF2 key derivation from configurable secret
+- Persistent GitHub tokens stored encrypted at rest
+- No logging of full conversation content at INFO/WARN level
+- Timing‑safe comparison for any API‑key authentication
 
-- Service uptime: 99.9% availability
-- Graceful degradation on component failure
-- Automatic component restart on failure
-- Data persistence across service restarts
-
-### Security
-
-- AES-256 encryption for cached data
-- API key authentication for clients
-- HTTPS-only communication with GitHub Copilot
-- No logging of sensitive code content at INFO level
+**Reliability:**
+- Graceful degradation on token expiry (cache‑only mode)
+- Automatic token refresh
+- Component‑level health monitoring with automatic restart
+- Service uptime target: 99.9%

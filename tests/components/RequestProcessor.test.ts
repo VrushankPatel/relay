@@ -1,390 +1,137 @@
-/**
- * Unit tests for RequestProcessor component.
- * 
- * Tests context extraction, normalization, and hash generation.
- */
-
 import { describe, it, expect } from 'vitest';
 import { RequestProcessor } from '../../src/components/RequestProcessor.js';
-import { CompletionRequestBody } from '../../src/types/requests.js';
+import { InternalChatRequest } from '../../src/types/chat.js';
 
 describe('RequestProcessor', () => {
   const processor = new RequestProcessor();
 
-  describe('extractContext', () => {
-    it('should extract context with file type, language, and cursor position', () => {
-      const request: CompletionRequestBody = {
-        prompt: 'test prompt',
-        language: 'typescript',
-        cursorPosition: 50,
-        fileContext: 'const x = 10;\nconst y = 20;\n// cursor here\nconst z = 30;',
+  describe('normalizeRequest', () => {
+    it('should normalize request with default values', () => {
+      const request: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: false,
       };
 
-      const context = processor.extractContext(request);
+      const normalized = processor.normalizeRequest(request);
 
-      expect(context.fileType).toBe('.ts');
-      expect(context.language).toBe('typescript');
-      expect(context.cursorPosition).toBe(50);
-      expect(context.precedingContent).toBeTruthy();
-      expect(context.followingContent).toBeTruthy();
+      expect(normalized.model).toBe('gpt-3.5-turbo');
+      expect(normalized.temperature).toBe(1.0);
+      expect(normalized.top_p).toBe(1.0);
+      expect(normalized.max_tokens).toBe(0);
+      expect(normalized.presence_penalty).toBe(0);
+      expect(normalized.frequency_penalty).toBe(0);
+      expect(normalized.stream).toBe(false);
+      expect(normalized.messages).toHaveLength(1);
     });
 
-    it('should extract up to 500 characters before cursor', () => {
-      const longContent = 'a'.repeat(1000);
-      const request: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'typescript',
-        cursorPosition: 600,
-        fileContext: longContent,
+    it('should keep provided values in request', () => {
+      const request: InternalChatRequest = {
+        model: 'gpt-4',
+        messages: [{ role: 'user', content: 'test' }],
+        temperature: 0.5,
+        top_p: 0.9,
+        max_tokens: 100,
+        presence_penalty: 0.1,
+        frequency_penalty: 0.2,
+        stream: true,
       };
 
-      const context = processor.extractContext(request);
+      const normalized = processor.normalizeRequest(request);
 
-      expect(context.precedingContent.length).toBe(500);
-      expect(context.precedingContent).toBe('a'.repeat(500));
-    });
-
-    it('should extract up to 100 characters after cursor', () => {
-      const request: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'typescript',
-        cursorPosition: 10,
-        fileContext: 'start here' + 'x'.repeat(200),
-      };
-
-      const context = processor.extractContext(request);
-
-      expect(context.followingContent.length).toBe(100);
-    });
-
-    it('should handle cursor at start of file', () => {
-      const request: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'python',
-        cursorPosition: 0,
-        fileContext: 'def hello():\n    pass',
-      };
-
-      const context = processor.extractContext(request);
-
-      expect(context.precedingContent).toBe('');
-      expect(context.followingContent).toBeTruthy();
-    });
-
-    it('should handle cursor at end of file', () => {
-      const request: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'javascript',
-        cursorPosition: 20,
-        fileContext: 'console.log("test");',
-      };
-
-      const context = processor.extractContext(request);
-
-      expect(context.precedingContent).toBe('console.log("test");');
-      expect(context.followingContent).toBe('');
-    });
-  });
-
-  describe('normalizeContext - whitespace normalization', () => {
-    it('should normalize line endings to LF', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: 'line1\r\nline2\rline3\n',
-        followingContent: 'after\r\n',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      expect(normalized.precedingContent).toBe('line1\nline2\nline3');
-      expect(normalized.followingContent).toBe('after');
-    });
-
-    it('should convert tabs to 4-space equivalent', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: '\tindented\n\t\tdouble',
-        followingContent: '\tmore',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      expect(normalized.precedingContent).toBe('    indented\n        double');
-      expect(normalized.followingContent).toBe('    more');
-    });
-
-    it('should remove leading and trailing whitespace per line', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: '  leading\ntrailing  \n  both  ',
-        followingContent: '  spaces  ',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      // Leading indentation is preserved, trailing is removed
-      expect(normalized.precedingContent).toBe('  leading\ntrailing\n  both');
-      expect(normalized.followingContent).toBe('  spaces');
-    });
-
-    it('should collapse multiple consecutive spaces to single space in content', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: 'const  x   =    10;',
-        followingContent: 'let    y  =  20;',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      expect(normalized.precedingContent).toBe('const x = 10;');
-      expect(normalized.followingContent).toBe('let y = 20;');
-    });
-
-    it('should preserve indentation structure', () => {
-      const context = {
-        fileType: '.py',
-        precedingContent: '    def  hello():\n        return  "world"',
-        followingContent: '    # comment',
-        cursorPosition: 0,
-        language: 'python',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      // Indentation preserved, but multiple spaces in content collapsed
-      expect(normalized.precedingContent).toBe('    def hello():\n        return "world"');
-      expect(normalized.followingContent).toBe('    # comment');
-    });
-
-    it('should handle mixed whitespace issues', () => {
-      const context = {
-        fileType: '.js',
-        precedingContent: '\tfunction  test()  {\r\n\t\treturn   true;\r\n\t}  ',
-        followingContent: '\tconsole.log(  "test"  );',
-        cursorPosition: 0,
-        language: 'javascript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      // Tabs → spaces, line endings → LF, multiple spaces collapsed, trailing removed
-      expect(normalized.precedingContent).toBe('    function test() {\n        return true;\n    }');
-      expect(normalized.followingContent).toBe('    console.log( "test" );');
-    });
-
-    it('should produce identical output for whitespace-only differences', () => {
-      const context1 = {
-        fileType: '.ts',
-        precedingContent: 'const x = 10;',
-        followingContent: 'const y = 20;',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const context2 = {
-        fileType: '.ts',
-        precedingContent: 'const  x  =  10;',
-        followingContent: 'const   y   =   20;',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized1 = processor.normalizeContext(context1);
-      const normalized2 = processor.normalizeContext(context2);
-
-      expect(normalized1.precedingContent).toBe(normalized2.precedingContent);
-      expect(normalized1.followingContent).toBe(normalized2.followingContent);
-    });
-
-    it('should handle empty strings', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: '',
-        followingContent: '',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      expect(normalized.precedingContent).toBe('');
-      expect(normalized.followingContent).toBe('');
-    });
-
-    it('should handle strings with only whitespace', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: '   \n\t\t\n  ',
-        followingContent: '\t  \n  \t',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
-
-      const normalized = processor.normalizeContext(context);
-
-      expect(normalized.precedingContent).toBe('');
-      expect(normalized.followingContent).toBe('');
+      expect(normalized.temperature).toBe(0.5);
+      expect(normalized.top_p).toBe(0.9);
+      expect(normalized.max_tokens).toBe(100);
+      expect(normalized.presence_penalty).toBe(0.1);
+      expect(normalized.frequency_penalty).toBe(0.2);
+      expect(normalized.stream).toBe(true);
     });
   });
 
   describe('generateContextHash', () => {
-    it('should generate SHA-256 hash from normalized context', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: 'const x = 10;',
-        followingContent: 'const y = 20;',
-        language: 'typescript',
+    it('should generate valid SHA-256 hash', () => {
+      const request: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: false,
       };
+      const normalized = processor.normalizeRequest(request);
+      const { contextHash, prefixHash } = processor.generateContextHash(normalized);
 
-      const hash = processor.generateContextHash(context);
+      expect(contextHash).toMatch(/^[a-f0-9]{64}$/); // SHA-256 produces 64 hex chars
+      expect(prefixHash).toBeNull(); // Only 1 message
+    });
 
-      expect(hash).toMatch(/^[a-f0-9]{64}$/); // SHA-256 produces 64 hex chars
+    it('should generate prefixHash when there are multiple messages', () => {
+      const request: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: 'You are an AI.' },
+          { role: 'user', content: 'Hello' }
+        ],
+        stream: false,
+      };
+      const normalized = processor.normalizeRequest(request);
+      const { contextHash, prefixHash } = processor.generateContextHash(normalized);
+
+      expect(contextHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(prefixHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(contextHash).not.toBe(prefixHash);
     });
 
     it('should produce deterministic hashes', () => {
-      const context = {
-        fileType: '.ts',
-        precedingContent: 'const x = 10;',
-        followingContent: 'const y = 20;',
-        language: 'typescript',
+      const request: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: false,
       };
+      const normalized = processor.normalizeRequest(request);
+      
+      const hash1 = processor.generateContextHash(normalized);
+      const hash2 = processor.generateContextHash(normalized);
 
-      const hash1 = processor.generateContextHash(context);
-      const hash2 = processor.generateContextHash(context);
-
-      expect(hash1).toBe(hash2);
+      expect(hash1.contextHash).toBe(hash2.contextHash);
+      expect(hash1.prefixHash).toBe(hash2.prefixHash);
     });
 
     it('should produce different hashes for different contexts', () => {
-      const context1 = {
-        fileType: '.ts',
-        precedingContent: 'const x = 10;',
-        followingContent: 'const y = 20;',
-        language: 'typescript',
+      const request1: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: false,
+      };
+      
+      const request2: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello world' }],
+        stream: false,
       };
 
-      const context2 = {
-        fileType: '.ts',
-        precedingContent: 'const x = 11;', // Different content
-        followingContent: 'const y = 20;',
-        language: 'typescript',
-      };
+      const hash1 = processor.generateContextHash(processor.normalizeRequest(request1));
+      const hash2 = processor.generateContextHash(processor.normalizeRequest(request2));
 
-      const hash1 = processor.generateContextHash(context1);
-      const hash2 = processor.generateContextHash(context2);
-
-      expect(hash1).not.toBe(hash2);
+      expect(hash1.contextHash).not.toBe(hash2.contextHash);
     });
 
-    it('should produce identical hashes for contexts differing only in whitespace', () => {
-      const rawContext1 = {
-        fileType: '.ts',
-        precedingContent: 'const x = 10;',
-        followingContent: 'const y = 20;',
-        cursorPosition: 0,
-        language: 'typescript',
+    it('should produce different hashes for different parameters', () => {
+      const request1: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello' }],
+        temperature: 0.5,
+        stream: false,
+      };
+      
+      const request2: InternalChatRequest = {
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: 'hello' }],
+        temperature: 1.0,
+        stream: false,
       };
 
-      const rawContext2 = {
-        fileType: '.ts',
-        precedingContent: 'const  x  =  10;',
-        followingContent: 'const   y   =   20;',
-        cursorPosition: 0,
-        language: 'typescript',
-      };
+      const hash1 = processor.generateContextHash(processor.normalizeRequest(request1));
+      const hash2 = processor.generateContextHash(processor.normalizeRequest(request2));
 
-      const normalized1 = processor.normalizeContext(rawContext1);
-      const normalized2 = processor.normalizeContext(rawContext2);
-
-      const hash1 = processor.generateContextHash(normalized1);
-      const hash2 = processor.generateContextHash(normalized2);
-
-      expect(hash1).toBe(hash2);
-    });
-
-    it('should include all context components in hash', () => {
-      const context1 = {
-        fileType: '.ts',
-        precedingContent: 'test',
-        followingContent: 'test',
-        language: 'typescript',
-      };
-
-      const context2 = {
-        fileType: '.js', // Different file type
-        precedingContent: 'test',
-        followingContent: 'test',
-        language: 'typescript',
-      };
-
-      const hash1 = processor.generateContextHash(context1);
-      const hash2 = processor.generateContextHash(context2);
-
-      expect(hash1).not.toBe(hash2);
-    });
-  });
-
-  describe('end-to-end normalization flow', () => {
-    it('should produce same hash for requests differing only in whitespace', () => {
-      const request1: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'typescript',
-        cursorPosition: 99999,
-        fileContext: 'const x = 10;\nconst y = 20;// more code',
-      };
-
-      const request2: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'typescript',
-        cursorPosition: 99999,
-        fileContext: 'const  x  =  10;\nconst   y   =   20;// more code',
-      };
-
-      const context1 = processor.extractContext(request1);
-      const context2 = processor.extractContext(request2);
-
-      const normalized1 = processor.normalizeContext(context1);
-      const normalized2 = processor.normalizeContext(context2);
-
-      const hash1 = processor.generateContextHash(normalized1);
-      const hash2 = processor.generateContextHash(normalized2);
-
-      expect(hash1).toBe(hash2);
-    });
-
-    it('should produce different hash for semantically different code', () => {
-      const request1: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'typescript',
-        cursorPosition: 20,
-        fileContext: 'const x = 10;\nconst y = 20;// more code',
-      };
-
-      const request2: CompletionRequestBody = {
-        prompt: 'test',
-        language: 'typescript',
-        cursorPosition: 20,
-        fileContext: 'const x = 11;\nconst y = 20;// more code', // Different value
-      };
-
-      const context1 = processor.extractContext(request1);
-      const context2 = processor.extractContext(request2);
-
-      const normalized1 = processor.normalizeContext(context1);
-      const normalized2 = processor.normalizeContext(context2);
-
-      const hash1 = processor.generateContextHash(normalized1);
-      const hash2 = processor.generateContextHash(normalized2);
-
-      expect(hash1).not.toBe(hash2);
+      expect(hash1.contextHash).not.toBe(hash2.contextHash);
     });
   });
 });

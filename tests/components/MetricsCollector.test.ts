@@ -87,8 +87,8 @@ describe('MetricsCollector', () => {
       collector.recordError('TIMEOUT');
       collector.recordError('RATE_LIMIT');
       const prometheus = collector.exportPrometheus();
-      expect(prometheus).toContain('proxy_errors_total{type="TIMEOUT"} 2');
-      expect(prometheus).toContain('proxy_errors_total{type="RATE_LIMIT"} 1');
+      expect(prometheus).toContain('relay_errors_total{type="TIMEOUT"} 2');
+      expect(prometheus).toContain('relay_errors_total{type="RATE_LIMIT"} 1');
     });
   });
 
@@ -102,16 +102,23 @@ describe('MetricsCollector', () => {
     it('should include all required metrics', () => {
       collector.recordRequest(200, true, 10, 'user1');
       collector.recordTokens(100, 50);
+      collector.recordCreditsSavedByCache(50);
+      collector.recordCreditsSavedByDedup(20);
+      collector.recordModelCredits('gpt-4', 150);
+
       const output = collector.exportPrometheus();
-      expect(output).toContain('proxy_requests_total');
-      expect(output).toContain('proxy_cache_hits_total');
-      expect(output).toContain('proxy_cache_misses_total');
-      expect(output).toContain('proxy_cache_hit_rate');
-      expect(output).toContain('proxy_latency_milliseconds');
-      expect(output).toContain('proxy_tokens_consumed_total');
-      expect(output).toContain('proxy_tokens_saved_total');
-      expect(output).toContain('proxy_errors_total');
-      expect(output).toContain('proxy_uptime_seconds');
+      expect(output).toContain('relay_requests_total');
+      expect(output).toContain('relay_cache_hits_total');
+      expect(output).toContain('relay_cache_misses_total');
+      expect(output).toContain('relay_cache_hit_rate');
+      expect(output).toContain('relay_latency_milliseconds');
+      expect(output).toContain('relay_tokens_consumed_total');
+      expect(output).toContain('relay_tokens_saved_total');
+      expect(output).toContain('relay_errors_total');
+      expect(output).toContain('relay_uptime_seconds');
+      expect(output).toContain('relay_credits_saved_by_cache_total 50');
+      expect(output).toContain('relay_credits_saved_by_dedup_total 20');
+      expect(output).toContain('relay_credits_consumed_by_model_total{model="gpt-4"} 150');
     });
 
     it('should end with newline', () => {

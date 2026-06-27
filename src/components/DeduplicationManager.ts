@@ -1,121 +1,61 @@
-/**
- * Deduplication Manager component for the GitHub Copilot Token Optimizer Proxy.
- * 
- * This component prevents duplicate simultaneous requests from hitting the API
- * by coalescing identical requests within a time window.
- */
-
-import { CopilotResponse } from '../types/copilot.js';
 import { createChildLogger } from '../utils/logger.js';
 import type { Logger } from 'pino';
 
 const DEFAULT_COALESCE_WINDOW_MS = 1000;
 const CLEANUP_DELAY_MS = 100;
 
-/**
- * In-flight request tracking entry.
- */
-interface InFlightRequest {
-  /** Context hash identifying the request */
-  contextHash: string;
-  
-  /** Timestamp when the request started */
-  startTime: number;
-  
-  /** Current status of the request */
-  status: 'pending' | 'completed' | 'failed';
-  
-  /** Response from the API (populated on completion) */
-  response?: CopilotResponse;
-  
-  /** Error that occurred (populated on failure) */
-  error?: Error;
-  
-  /** List of waiters for this request */
-  waiters: Waiter[];
-  
-  /** Promise that resolves when the request completes */
-  promise: Promise<CopilotResponse>;
-  
-  /** Resolve function for the promise */
-  resolve?: (response: CopilotResponse) => void;
-  
-  /** Reject function for the promise */
-  reject?: (error: Error) => void;
+export interface StreamWaiter<C = any> {
+  requestId: string;
+  timestamp: number;
+  onChunk: (chunk: C) => void;
+  onComplete: () => void;
+  onError: (error: Error) => void;
 }
 
-/**
- * A waiter is a duplicate request waiting for the primary request to complete.
- */
-interface Waiter {
-  /** Unique identifier for this waiter */
+export interface Waiter<T = any> {
   requestId: string;
-  
-  /** Timestamp when the waiter was registered */
   timestamp: number;
-  
-  /** Resolve function to call when request completes */
-  resolve: (response: CopilotResponse) => void;
-  
-  /** Reject function to call when request fails */
+  resolve: (response: T) => void;
   reject: (error: Error) => void;
 }
 
-/**
- * Deduplication Manager interface.
- */
-export interface IDeduplicationManager {
-  /**
-   * Check if a request is a duplicate of an in-flight request.
-   * @param contextHash SHA-256 hash of the normalized context
-   * @returns True if duplicate, false otherwise
-   */
+export interface InFlightRequest<T = any, C = any> {
+  contextHash: string;
+  startTime: number;
+  status: 'pending' | 'completed' | 'failed';
+  isStream: boolean;
+  
+  response?: T;
+  error?: Error;
+  
+  waiters: Waiter<T>[];
+  promise: Promise<T>;
+  resolve?: (response: T) => void;
+  reject?: (error: Error) => void;
+
+  chunks: C[];
+  streamWaiters: StreamWaiter<C>[];
+}
+
+export interface IDeduplicationManager<T = any, C = any> {
   isDuplicate(contextHash: string): boolean;
+  registerRequest(contextHash: string, isStream?: boolean): Promise<void>;
   
-  /**
-   * Register a new in-flight request.
-   * @param contextHash SHA-256 hash of the normalized context
-   */
-  registerRequest(contextHash: string): Promise<void>;
+  waitForCompletion(contextHash: string): Promise<T>;
+  completeRequest(contextHash: string, response: T): void;
   
-  /**
-   * Wait for an existing request to complete.
-   * @param contextHash SHA-256 hash of the normalized context
-   * @returns Promise that resolves with the response
-   */
-  waitForCompletion(contextHash: string): Promise<CopilotResponse>;
+  waitForStream(contextHash: string): AsyncIterable<C>;
+  addStreamChunk(contextHash: string, chunk: C): void;
+  completeStream(contextHash: string): void;
   
-  /**
-   * Mark a request as completed and notify all waiters.
-   * @param contextHash SHA-256 hash of the normalized context
-   * @param response Copilot response
-   */
-  completeRequest(contextHash: string, response: CopilotResponse): void;
-  
-  /**
-   * Handle request failure.
-   * @param contextHash SHA-256 hash of the normalized context
-   * @param error Error that occurred
-   */
   failRequest(contextHash: string, error: Error): void;
 }
 
-/**
- * Implementation of the Deduplication Manager.
- * 
- * Coalesces requests with the same context hash within 1 second.
- * The first request proceeds to the API, while duplicates wait for the result.
- * On failure, the next queued request becomes the primary request.
- */
-export class DeduplicationManager implements IDeduplicationManager {
-  private inFlightRequests: Map<string, InFlightRequest>;
+export class DeduplicationManager<T = any, C = any> implements IDeduplicationManager<T, C> {
+  private inFlightRequests: Map<string, InFlightRequest<T, C>>;
   private readonly coalesceWindowMs: number;
   private logger: Logger;
   
-  /**
-   * Create a new Deduplication Manager.
-   * @param coalesceWindowMs Time window for coalescing duplicate requests in milliseconds (default: 1000ms)
-   */
   constructor(coalesceWindowMs = DEFAULT_COALESCE_WINDOW_MS) {
     this.inFlightRequests = new Map();
     this.coalesceWindowMs = coalesceWindowMs;
@@ -124,13 +64,6 @@ export class DeduplicationManager implements IDeduplicationManager {
     this.logger.info({ coalesceWindowMs }, 'Deduplication Manager initialized');
   }
   
-  /**
-   * Check if a request is a duplicate of an in-flight request.
-   * A request is considered duplicate if:
-   * 1. An in-flight request with the same hash exists
-   * 2. The in-flight request is still pending
-   * 3. The in-flight request started within the coalesce window
-   */
   isDuplicate(contextHash: string): boolean {
     const inFlight = this.inFlightRequests.get(contextHash);
     
@@ -138,27 +71,19 @@ export class DeduplicationManager implements IDeduplicationManager {
       return false;
     }
     
-    // Check if request is still pending
     if (inFlight.status !== 'pending') {
       return false;
     }
     
-    // Check if request is within the coalesce window
     const age = Date.now() - inFlight.startTime;
     if (age > this.coalesceWindowMs) {
-      // Request is too old, not a duplicate
       return false;
     }
     
     return true;
   }
   
-  /**
-   * Register a new in-flight request.
-   * Creates a promise that will be resolved/rejected when the request completes.
-   */
-  async registerRequest(contextHash: string): Promise<void> {
-    // Check if there's already an in-flight request
+  async registerRequest(contextHash: string, isStream: boolean = false): Promise<void> {
     if (this.inFlightRequests.has(contextHash)) {
       this.logger.warn(
         { contextHash },
@@ -167,38 +92,37 @@ export class DeduplicationManager implements IDeduplicationManager {
       return;
     }
     
-    let resolveFunc: ((response: CopilotResponse) => void) | undefined;
+    let resolveFunc: ((response: T) => void) | undefined;
     let rejectFunc: ((error: Error) => void) | undefined;
     
-    const promise = new Promise<CopilotResponse>((resolve, reject) => {
+    const promise = new Promise<T>((resolve, reject) => {
       resolveFunc = resolve;
       rejectFunc = reject;
     });
-    promise.catch(() => {}); // suppress unhandled rejection when failRequest rejects before a caller awaits
+    promise.catch(() => {}); // suppress unhandled rejection
     
-    const inFlightRequest: InFlightRequest = {
+    const inFlightRequest: InFlightRequest<T, C> = {
       contextHash,
       startTime: Date.now(),
       status: 'pending',
+      isStream,
       waiters: [],
       promise,
       resolve: resolveFunc,
       reject: rejectFunc,
+      chunks: [],
+      streamWaiters: [],
     };
     
     this.inFlightRequests.set(contextHash, inFlightRequest);
     
     this.logger.debug(
-      { contextHash, startTime: inFlightRequest.startTime },
+      { contextHash, startTime: inFlightRequest.startTime, isStream },
       'Registered new in-flight request'
     );
   }
   
-  /**
-   * Wait for an existing request to complete.
-   * Returns a promise that resolves when the primary request completes.
-   */
-  async waitForCompletion(contextHash: string): Promise<CopilotResponse> {
+  async waitForCompletion(contextHash: string): Promise<T> {
     const inFlight = this.inFlightRequests.get(contextHash);
     
     if (!inFlight) {
@@ -207,21 +131,22 @@ export class DeduplicationManager implements IDeduplicationManager {
       throw error;
     }
     
-    // If request is already completed, return the cached response
-    if (inFlight.status === 'completed' && inFlight.response) {
+    if (inFlight.isStream) {
+      throw new Error(`Request for context hash ${contextHash} is a stream, use waitForStream instead`);
+    }
+    
+    if (inFlight.status === 'completed' && inFlight.response !== undefined) {
       this.logger.debug({ contextHash }, 'Returning cached response from completed request');
       return inFlight.response;
     }
     
-    // If request failed, throw the error
     if (inFlight.status === 'failed' && inFlight.error) {
       this.logger.debug({ contextHash }, 'Throwing cached error from failed request');
       throw inFlight.error;
     }
     
-    // Create a new promise for this waiter
-    const waiterPromise = new Promise<CopilotResponse>((resolve, reject) => {
-      const waiter: Waiter = {
+    const waiterPromise = new Promise<T>((resolve, reject) => {
+      const waiter: Waiter<T> = {
         requestId: `waiter-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         timestamp: Date.now(),
         resolve,
@@ -239,11 +164,7 @@ export class DeduplicationManager implements IDeduplicationManager {
     return waiterPromise;
   }
   
-  /**
-   * Mark a request as completed and notify all waiters.
-   * All waiters receive the same response.
-   */
-  completeRequest(contextHash: string, response: CopilotResponse): void {
+  completeRequest(contextHash: string, response: T): void {
     const inFlight = this.inFlightRequests.get(contextHash);
     
     if (!inFlight) {
@@ -254,16 +175,21 @@ export class DeduplicationManager implements IDeduplicationManager {
       return;
     }
     
-    // Update request status
+    if (inFlight.isStream) {
+      this.logger.warn(
+        { contextHash },
+        'Attempt to complete stream request with completeRequest, use completeStream instead'
+      );
+      return;
+    }
+    
     inFlight.status = 'completed';
     inFlight.response = response;
     
-    // Resolve the primary promise
     if (inFlight.resolve) {
       inFlight.resolve(response);
     }
     
-    // Notify all waiters
     const waiterCount = inFlight.waiters.length;
     for (const waiter of inFlight.waiters) {
       waiter.resolve(response);
@@ -274,30 +200,144 @@ export class DeduplicationManager implements IDeduplicationManager {
       );
     }
     
+    const tokenCount = response && typeof response === 'object' && 'tokenCount' in response ? (response as any).tokenCount : undefined;
+    const completionCount = response && typeof response === 'object' && 'completions' in response ? (response as any).completions?.length : undefined;
+
     this.logger.info(
       {
         contextHash,
         waiterCount,
         duration: Date.now() - inFlight.startTime,
-        tokenCount: response.tokenCount,
-        completionCount: response.completions.length,
+        tokenCount,
+        completionCount,
       },
       'Request completed and all waiters notified'
     );
     
-    // Clean up the in-flight request after a short delay
-    // Keep it for a brief moment in case of race conditions
     setTimeout(() => {
       this.inFlightRequests.delete(contextHash);
       this.logger.debug({ contextHash }, 'Cleaned up completed request');
     }, CLEANUP_DELAY_MS);
   }
   
-  /**
-   * Handle request failure.
-   * If there are waiters, the next waiter becomes the primary request.
-   * Otherwise, all waiters are notified of the failure.
-   */
+  async *waitForStream(contextHash: string): AsyncIterable<C> {
+    const inFlight = this.inFlightRequests.get(contextHash);
+    
+    if (!inFlight) {
+      throw new Error(`No in-flight request found for context hash: ${contextHash}`);
+    }
+    
+    if (!inFlight.isStream) {
+      throw new Error(`Request for context hash ${contextHash} is not a stream`);
+    }
+
+    let index = 0;
+    
+    while (index < inFlight.chunks.length) {
+      yield inFlight.chunks[index++];
+    }
+
+    let isComplete = inFlight.status === 'completed';
+    let hasError = inFlight.status === 'failed';
+    let err = inFlight.error;
+
+    if (isComplete) return;
+    if (hasError && err) throw err;
+
+    let resolveNext: (() => void) | null = null;
+    let rejectNext: ((err: Error) => void) | null = null;
+
+    const waiter: StreamWaiter<C> = {
+      requestId: `stream-waiter-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      timestamp: Date.now(),
+      onChunk: () => {
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
+          rejectNext = null;
+        }
+      },
+      onComplete: () => {
+        isComplete = true;
+        if (resolveNext) {
+          resolveNext();
+          resolveNext = null;
+          rejectNext = null;
+        }
+      },
+      onError: (e) => {
+        hasError = true;
+        err = e;
+        if (rejectNext) {
+          rejectNext(e);
+          resolveNext = null;
+          rejectNext = null;
+        }
+      }
+    };
+
+    inFlight.streamWaiters.push(waiter);
+    this.logger.debug({ contextHash, waiterId: waiter.requestId }, 'Added stream waiter');
+
+    try {
+      while (true) {
+        if (index < inFlight.chunks.length) {
+          yield inFlight.chunks[index++];
+        } else if (hasError) {
+          throw err || new Error('Stream failed');
+        } else if (isComplete) {
+          return;
+        } else {
+          await new Promise<void>((resolve, reject) => {
+            resolveNext = resolve;
+            rejectNext = reject;
+          });
+        }
+      }
+    } finally {
+      const wIndex = inFlight.streamWaiters.indexOf(waiter);
+      if (wIndex !== -1) {
+        inFlight.streamWaiters.splice(wIndex, 1);
+      }
+    }
+  }
+
+  addStreamChunk(contextHash: string, chunk: C): void {
+    const inFlight = this.inFlightRequests.get(contextHash);
+    if (!inFlight || !inFlight.isStream) {
+      return;
+    }
+    
+    inFlight.chunks.push(chunk);
+    
+    for (const waiter of inFlight.streamWaiters) {
+      waiter.onChunk(chunk);
+    }
+  }
+
+  completeStream(contextHash: string): void {
+    const inFlight = this.inFlightRequests.get(contextHash);
+    if (!inFlight || !inFlight.isStream) {
+      return;
+    }
+    
+    inFlight.status = 'completed';
+    
+    for (const waiter of inFlight.streamWaiters) {
+      waiter.onComplete();
+    }
+    
+    this.logger.info(
+      { contextHash, streamWaiterCount: inFlight.streamWaiters.length, chunks: inFlight.chunks.length },
+      'Stream request completed'
+    );
+    
+    setTimeout(() => {
+      this.inFlightRequests.delete(contextHash);
+      this.logger.debug({ contextHash }, 'Cleaned up completed stream request');
+    }, CLEANUP_DELAY_MS);
+  }
+
   failRequest(contextHash: string, error: Error): void {
     const inFlight = this.inFlightRequests.get(contextHash);
     
@@ -308,8 +348,23 @@ export class DeduplicationManager implements IDeduplicationManager {
       );
       return;
     }
+
+    if (inFlight.isStream) {
+      inFlight.status = 'failed';
+      inFlight.error = error;
+      for (const waiter of inFlight.streamWaiters) {
+        waiter.onError(error);
+      }
+      this.logger.error(
+        { contextHash, error: error.message },
+        'Stream request failed'
+      );
+      setTimeout(() => {
+        this.inFlightRequests.delete(contextHash);
+      }, CLEANUP_DELAY_MS);
+      return;
+    }
     
-    // Check if there are waiters who can become the primary request
     if (inFlight.waiters.length > 0) {
       this.logger.info(
         {
@@ -320,28 +375,22 @@ export class DeduplicationManager implements IDeduplicationManager {
         'Primary request failed, next waiter will become primary'
       );
       
-      // Remove the first waiter and make it the new primary
       const nextWaiter = inFlight.waiters.shift();
       
       if (nextWaiter) {
-        // The next waiter becomes the new primary.
-        // Reject the original primary promise first.
         if (inFlight.reject) {
           inFlight.reject(error);
         }
 
-        // Reset the in-flight request for the new primary
         inFlight.startTime = Date.now();
         inFlight.status = 'pending';
         delete inFlight.response;
         delete inFlight.error;
 
-        // Adopt the shifted waiter's resolve/reject so its promise becomes
-        // the new primary promise — no waiter is left dangling.
         inFlight.resolve = nextWaiter.resolve;
         inFlight.reject = nextWaiter.reject;
-        inFlight.promise = new Promise<CopilotResponse>(() => {});
-        inFlight.promise.catch(() => {}); // suppress unhandled rejection
+        inFlight.promise = new Promise<T>(() => {});
+        inFlight.promise.catch(() => {});
 
         this.logger.debug(
           {
@@ -356,16 +405,13 @@ export class DeduplicationManager implements IDeduplicationManager {
       }
     }
     
-    // No waiters, fail all and clean up
     inFlight.status = 'failed';
     inFlight.error = error;
     
-    // Reject the primary promise
     if (inFlight.reject) {
       inFlight.reject(error);
     }
     
-    // Notify all remaining waiters of the failure
     for (const waiter of inFlight.waiters) {
       waiter.reject(error);
       
@@ -385,25 +431,16 @@ export class DeduplicationManager implements IDeduplicationManager {
       'Request failed and all waiters notified'
     );
     
-    // Clean up the in-flight request
     setTimeout(() => {
       this.inFlightRequests.delete(contextHash);
       this.logger.debug({ contextHash }, 'Cleaned up failed request');
     }, 100);
   }
   
-  /**
-   * Get the current number of in-flight requests.
-   * Useful for monitoring and diagnostics.
-   */
   getInFlightCount(): number {
     return this.inFlightRequests.size;
   }
   
-  /**
-   * Get statistics about current in-flight requests.
-   * Useful for monitoring and diagnostics.
-   */
   getStatistics(): {
     inFlightCount: number;
     totalWaiters: number;
@@ -415,7 +452,7 @@ export class DeduplicationManager implements IDeduplicationManager {
     let oldestRequestAge = 0;
     
     for (const request of this.inFlightRequests.values()) {
-      totalWaiters += request.waiters.length;
+      totalWaiters += request.isStream ? request.streamWaiters.length : request.waiters.length;
       const age = Date.now() - request.startTime;
       if (age > oldestRequestAge) {
         oldestRequestAge = age;

@@ -23,6 +23,9 @@ export class MetricsCollector {
   private errorsByType: Map<string, number> = new Map();
   private logger: ReturnType<typeof createChildLogger>;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private creditsSavedByCache = 0;
+  private creditsSavedByDedup = 0;
+  private creditsConsumedByModel: Record<string, number> = {};
 
   constructor() {
     this.logger = createChildLogger('MetricsCollector');
@@ -54,6 +57,21 @@ export class MetricsCollector {
     this.errorsByType.set(errorType, (this.errorsByType.get(errorType) || 0) + 1);
   }
 
+  recordCreditsSavedByCache(credits: number): void {
+    this.creditsSavedByCache += credits;
+  }
+
+  recordCreditsSavedByDedup(credits: number): void {
+    this.creditsSavedByDedup += credits;
+  }
+
+  recordModelCredits(model: string, credits: number): void {
+    if (!this.creditsConsumedByModel[model]) {
+      this.creditsConsumedByModel[model] = 0;
+    }
+    this.creditsConsumedByModel[model] += credits;
+  }
+
   getAggregatedMetrics(): MetricsSummary {
     const totalTokens = this.tokensConsumed + this.tokensSaved;
     const uptime = process.uptime();
@@ -66,6 +84,9 @@ export class MetricsCollector {
       tokensSaved: this.tokensSaved,
       savingsPercentage: totalTokens > 0 ? (this.tokensSaved / totalTokens) * 100 : 0,
       requestsPerSecond: uptime > 0 ? this.totalRequests / uptime : 0,
+      creditsSavedByCache: this.creditsSavedByCache,
+      creditsSavedByDedup: this.creditsSavedByDedup,
+      creditsConsumedByModel: { ...this.creditsConsumedByModel },
     };
   }
 
@@ -73,43 +94,57 @@ export class MetricsCollector {
     const metrics = this.getAggregatedMetrics();
     const lines: string[] = [];
 
-    lines.push('# HELP proxy_requests_total Total number of requests processed');
-    lines.push('# TYPE proxy_requests_total counter');
-    lines.push(`proxy_requests_total ${metrics.totalRequests}`);
+    lines.push('# HELP relay_requests_total Total number of requests processed');
+    lines.push('# TYPE relay_requests_total counter');
+    lines.push(`relay_requests_total ${metrics.totalRequests}`);
 
-    lines.push('# HELP proxy_cache_hits_total Number of cache hit requests');
-    lines.push('# TYPE proxy_cache_hits_total counter');
-    lines.push(`proxy_cache_hits_total ${this.cacheHits}`);
+    lines.push('# HELP relay_cache_hits_total Number of cache hit requests');
+    lines.push('# TYPE relay_cache_hits_total counter');
+    lines.push(`relay_cache_hits_total ${this.cacheHits}`);
 
-    lines.push('# HELP proxy_cache_misses_total Number of cache miss requests');
-    lines.push('# TYPE proxy_cache_misses_total counter');
-    lines.push(`proxy_cache_misses_total ${this.cacheMisses}`);
+    lines.push('# HELP relay_cache_misses_total Number of cache miss requests');
+    lines.push('# TYPE relay_cache_misses_total counter');
+    lines.push(`relay_cache_misses_total ${this.cacheMisses}`);
 
-    lines.push('# HELP proxy_cache_hit_rate Current cache hit rate (0-100)');
-    lines.push('# TYPE proxy_cache_hit_rate gauge');
-    lines.push(`proxy_cache_hit_rate ${metrics.cacheHitRate}`);
+    lines.push('# HELP relay_cache_hit_rate Current cache hit rate (0-100)');
+    lines.push('# TYPE relay_cache_hit_rate gauge');
+    lines.push(`relay_cache_hit_rate ${metrics.cacheHitRate}`);
 
-    lines.push('# HELP proxy_latency_milliseconds Average request latency in ms');
-    lines.push('# TYPE proxy_latency_milliseconds gauge');
-    lines.push(`proxy_latency_milliseconds ${metrics.averageLatency}`);
+    lines.push('# HELP relay_latency_milliseconds Average request latency in ms');
+    lines.push('# TYPE relay_latency_milliseconds gauge');
+    lines.push(`relay_latency_milliseconds ${metrics.averageLatency}`);
 
-    lines.push('# HELP proxy_tokens_consumed_total Total tokens consumed by API calls');
-    lines.push('# TYPE proxy_tokens_consumed_total counter');
-    lines.push(`proxy_tokens_consumed_total ${metrics.tokensConsumed}`);
+    lines.push('# HELP relay_tokens_consumed_total Total tokens consumed by API calls');
+    lines.push('# TYPE relay_tokens_consumed_total counter');
+    lines.push(`relay_tokens_consumed_total ${metrics.tokensConsumed}`);
 
-    lines.push('# HELP proxy_tokens_saved_total Total tokens saved by caching');
-    lines.push('# TYPE proxy_tokens_saved_total counter');
-    lines.push(`proxy_tokens_saved_total ${metrics.tokensSaved}`);
+    lines.push('# HELP relay_tokens_saved_total Total tokens saved by caching');
+    lines.push('# TYPE relay_tokens_saved_total counter');
+    lines.push(`relay_tokens_saved_total ${metrics.tokensSaved}`);
 
-    lines.push('# HELP proxy_errors_total Total errors by type');
-    lines.push('# TYPE proxy_errors_total counter');
+    lines.push('# HELP relay_errors_total Total errors by type');
+    lines.push('# TYPE relay_errors_total counter');
     for (const [type, count] of this.errorsByType) {
-      lines.push(`proxy_errors_total{type="${type}"} ${count}`);
+      lines.push(`relay_errors_total{type="${type}"} ${count}`);
     }
 
-    lines.push('# HELP proxy_uptime_seconds Service uptime');
-    lines.push('# TYPE proxy_uptime_seconds gauge');
-    lines.push(`proxy_uptime_seconds ${process.uptime()}`);
+    lines.push('# HELP relay_uptime_seconds Service uptime');
+    lines.push('# TYPE relay_uptime_seconds gauge');
+    lines.push(`relay_uptime_seconds ${process.uptime()}`);
+
+    lines.push('# HELP relay_credits_saved_by_cache_total Total credits saved by cache hits');
+    lines.push('# TYPE relay_credits_saved_by_cache_total counter');
+    lines.push(`relay_credits_saved_by_cache_total ${this.creditsSavedByCache}`);
+
+    lines.push('# HELP relay_credits_saved_by_dedup_total Total credits saved by deduplication');
+    lines.push('# TYPE relay_credits_saved_by_dedup_total counter');
+    lines.push(`relay_credits_saved_by_dedup_total ${this.creditsSavedByDedup}`);
+
+    lines.push('# HELP relay_credits_consumed_by_model_total Total credits consumed per model');
+    lines.push('# TYPE relay_credits_consumed_by_model_total counter');
+    for (const [model, credits] of Object.entries(this.creditsConsumedByModel)) {
+      lines.push(`relay_credits_consumed_by_model_total{model="${model}"} ${credits}`);
+    }
 
     return lines.join('\n') + '\n';
   }
