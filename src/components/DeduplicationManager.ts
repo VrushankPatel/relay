@@ -174,6 +174,7 @@ export class DeduplicationManager implements IDeduplicationManager {
       resolveFunc = resolve;
       rejectFunc = reject;
     });
+    promise.catch(() => {}); // suppress unhandled rejection when failRequest rejects before a caller awaits
     
     const inFlightRequest: InFlightRequest = {
       contextHash,
@@ -340,6 +341,7 @@ export class DeduplicationManager implements IDeduplicationManager {
         inFlight.resolve = nextWaiter.resolve;
         inFlight.reject = nextWaiter.reject;
         inFlight.promise = new Promise<CopilotResponse>(() => {});
+        inFlight.promise.catch(() => {}); // suppress unhandled rejection
 
         this.logger.debug(
           {

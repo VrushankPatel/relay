@@ -1,6 +1,15 @@
 # Relay: GitHub Copilot Token Optimizer Proxy
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/VrushankPatel/relay/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/VrushankPatel/relay/actions/workflows/release.yml)
+[![Release](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/VrushankPatel/relay/releases)
+[![Downloads](https://img.shields.io/github/downloads/VrushankPatel/relay/total)](https://github.com/VrushankPatel/relay/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/VrushankPatel/relay/releases)
+[![Tests](https://img.shields.io/badge/tests-246%20passing-brightgreen)](https://github.com/VrushankPatel/relay/actions/workflows/release.yml)
+
 A transparent proxy that sits between your IDE and GitHub Copilot's API to reduce token consumption through intelligent caching, request deduplication, and token budget management.
+
+> ⭐ If you find this project useful, please consider [starring it on GitHub](https://github.com/VrushankPatel/relay)! Your support helps others discover it.
 
 See the [full usage guide](USAGE.md) for detailed setup, IDE configuration, and troubleshooting.
 
@@ -173,6 +182,10 @@ npm run lint           # ESLint
 ```
 
 ---
+
+## Star History
+
+If Relay helps you reduce your Copilot token consumption, consider giving it a ⭐ on [GitHub](https://github.com/VrushankPatel/relay). It helps others find the project and grow the community.
 
 ## License
 
