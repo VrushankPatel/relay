@@ -2,6 +2,13 @@
 
 ## Installation
 
+Using Make:
+```bash
+make install
+make build
+```
+
+Or using npm:
 ```bash
 npm install
 npm run build

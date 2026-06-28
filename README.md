@@ -42,9 +42,17 @@ The proxy will be available at `http://localhost:8080`.
 
 ## Installation (Node)
 
-If you prefer running natively without Docker:
+If you prefer running natively without Docker, you can configure and build the application.
 
 1. Install and build Relay:
+   
+   Using Make:
+   ```bash
+   make install
+   make build
+   ```
+   
+   Or using npm:
    ```bash
    npm install
    npm run build
