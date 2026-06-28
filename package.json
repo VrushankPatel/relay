@@ -1,7 +1,7 @@
 {
   "name": "relay",
   "version": "2.0.0",
-  "description": "Provider agnostic LLM caching and deduplication proxy for OpenAI, Anthropic, and Copilot Business/Enterprise",
+  "description": "Provider agnostic LLM caching and deduplication proxy for OpenAI, Anthropic, Gemini, and Copilot Business/Enterprise",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -24,7 +24,13 @@
     "caching",
     "cost-optimization",
     "openai",
-    "anthropic"
+    "anthropic",
+    "gemini",
+    "llm-proxy",
+    "llm-caching",
+    "prompt-caching",
+    "ai-gateway",
+    "deduplication"
   ],
   "author": "",
   "license": "MIT",
