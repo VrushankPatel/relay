@@ -18,20 +18,13 @@ const AUTH = args.values.auth;
 
 const PROMPT = `Write a comprehensive, production-ready implementation of a concurrent unbounded queue in Python using asyncio, including comprehensive docstrings and unit tests with pytest.`;
 
-let PRICING: Record<string, { input: number, output: number }> = {};
+import { loadPricing, PricingMap } from '../src/utils/pricing.js';
 
-async function loadPricing() {
+let PRICING: PricingMap = {};
+
+async function initializePricing() {
   const provider = new OpenAIProvider({ type: 'openai', apiKey: process.env.OPENAI_API_KEY || 'dummy' });
-  try {
-    const models = await provider.getModelList();
-    for (const model of models) {
-      if (model.input_cost_per_million !== null && model.output_cost_per_million !== null) {
-        PRICING[model.id] = { input: model.input_cost_per_million, output: model.output_cost_per_million };
-      }
-    }
-  } catch (e) {
-    console.warn('Could not load pricing from provider', e);
-  }
+  PRICING = await loadPricing([provider]);
 }
 
 async function sendRequest(isWarm: boolean): Promise<{ latency: number, promptTokens: number, completionTokens: number, cacheHit: boolean }> {
@@ -88,7 +81,7 @@ function calculateCost(model: string, inputTokens: number, outputTokens: number)
 
 async function main() {
   console.log(`🚀 Relay Benchmark Script`);
-  await loadPricing();
+  await initializePricing();
   console.log(`Target: http://${PROXY_HOST}:${PROXY_PORT} | Model: ${MODEL}`);
   console.log(`Pricing known: ${!!PRICING[MODEL as string]}`);
   console.log(`-----------------------------------------------------`);

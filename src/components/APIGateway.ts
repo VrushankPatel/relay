@@ -1,10 +1,6 @@
 /**
- * API Gateway for the GitHub Copilot Token Optimizer Proxy.
- * 
- * Handles all incoming HTTP connections from IDEs and outgoing responses.
- * Implements request validation, authentication, routing, and error handling.
- * 
- * Requirements: 1.1, 1.2, 13.1, 13.4, 13.5
+ * APIGateway: Express-like HTTP/HTTPS server for the Relay proxy.
+ * Provides routing, middleware execution, and request lifecycle management.
  */
 
 import http from 'http';
@@ -160,6 +156,7 @@ export class APIGatewayImpl implements APIGateway {
         });
       };
 
+      let server: http.Server | any; // `any` because `https.Server` type isn't imported at the top level
       if (tlsConfig?.enabled && tlsConfig.certPath && tlsConfig.keyPath) {
         try {
           const https = require('https');
@@ -168,22 +165,24 @@ export class APIGatewayImpl implements APIGateway {
             cert: fs.readFileSync(tlsConfig.certPath),
             key: fs.readFileSync(tlsConfig.keyPath)
           };
-          this.server = https.createServer(options, handler);
+          server = https.createServer(options, handler);
         } catch (error) {
           getLogger().error({ error }, 'Failed to initialize TLS/HTTPS server');
           reject(error);
           return;
         }
       } else {
-        this.server = http.createServer(handler);
+        server = http.createServer(handler);
       }
 
-      this.server.on('error', (error) => {
+      this.server = server;
+      // No async gaps here, so this.server cannot be concurrently nulled out before these run
+      server.on('error', (error: any) => {
         getLogger().error({ error }, 'Server error');
         reject(error);
       });
 
-      this.server.listen(port, host, () => {
+      server.listen(port, host, () => {
         getLogger().info({ host, port }, 'API Gateway started');
         resolve();
       });

@@ -37,6 +37,47 @@ describe('CacheManager', () => {
 
   afterEach(async () => {
     await fs.rm(tempDir, { recursive: true, force: true });
+    delete process.env.RELAY_CACHE_SECRET;
+  });
+
+  describe('Secret Generation', () => {
+    it('generates a secret on first run if no env var is set', async () => {
+      delete process.env.RELAY_CACHE_SECRET;
+      const testDir = path.join(tempDir, 'secret-test-1');
+      const cm1 = new CacheManager(10000, 24, testDir, true);
+      await cm1.initialize();
+      
+      const secretPath = path.join(testDir, '..', 'cache_secret');
+      const secretExists = await fs.access(secretPath).then(() => true).catch(() => false);
+      expect(secretExists).toBe(true);
+      const secretContent = await fs.readFile(secretPath, 'utf-8');
+      expect(secretContent.length).toBeGreaterThan(0);
+      expect((cm1 as any).cacheSecret).toBe(secretContent);
+    });
+
+    it('reuses the same generated secret on subsequent runs', async () => {
+      delete process.env.RELAY_CACHE_SECRET;
+      const testDir = path.join(tempDir, 'secret-test-2');
+      const cm1 = new CacheManager(10000, 24, testDir, true);
+      await cm1.initialize();
+      const initialSecret = (cm1 as any).cacheSecret;
+      
+      const cm2 = new CacheManager(10000, 24, testDir, true);
+      await cm2.initialize();
+      expect((cm2 as any).cacheSecret).toBe(initialSecret);
+    });
+
+    it('does not generate a secret if RELAY_CACHE_SECRET is set', async () => {
+      process.env.RELAY_CACHE_SECRET = 'my-explicit-secret';
+      const testDir = path.join(tempDir, 'secret-test-3');
+      const cm1 = new CacheManager(10000, 24, testDir, true);
+      await cm1.initialize();
+      
+      const secretPath = path.join(testDir, '..', 'cache_secret');
+      const secretExists = await fs.access(secretPath).then(() => true).catch(() => false);
+      expect(secretExists).toBe(false);
+      expect((cm1 as any).cacheSecret).toBe('my-explicit-secret');
+    });
   });
 
   describe('shouldBypassCache', () => {

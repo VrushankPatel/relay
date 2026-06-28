@@ -250,21 +250,8 @@ export class RequestForwarder implements IRequestForwarder {
       }
     }
 
-    let endpointUrl = provider.getEndpointUrl();
-    let targetUrlStr = endpointUrl;
-    
-    // Attempt to derive baseUrl
-    if (targetUrlStr.endsWith('/v1/chat/completions')) {
-      targetUrlStr = targetUrlStr.substring(0, targetUrlStr.length - '/v1/chat/completions'.length) + pathUrl;
-    } else if (targetUrlStr.endsWith('/chat/completions')) {
-      targetUrlStr = targetUrlStr.substring(0, targetUrlStr.length - '/chat/completions'.length) + pathUrl.replace(/^\/v1/, '');
-    } else if (targetUrlStr.endsWith('/v1/messages')) {
-      targetUrlStr = targetUrlStr.substring(0, targetUrlStr.length - '/v1/messages'.length) + pathUrl;
-    } else {
-      targetUrlStr = new URL(pathUrl, endpointUrl).toString();
-    }
-
-    const targetUrl = new URL(targetUrlStr);
+    const baseUrl = (provider as any).baseUrl || provider.getEndpointUrl().replace(/\/(v1\/)?(chat\/)?completions$|\/v1\/messages$|:streamGenerateContent$|:generateContent$/, '');
+    const targetUrl = new URL(baseUrl + (baseUrl.endsWith('/') || pathUrl.startsWith('/') ? '' : '/') + pathUrl.replace(/^\/+/, '/'));
     
     const options = {
       method: req.method,

@@ -159,10 +159,14 @@ describe('Relay Proxy Integration Tests', () => {
           return compatibilityLayer.formatOpenAIResponse(internalRes);
         };
 
+        const shouldBypass = cacheManager.shouldBypassCache(normalized);
+
         // Cache exact lookup
-        const exactMatch = await cacheManager.lookupExact(contextHash);
-        if (exactMatch) {
-          return sendResponse(200, formatResponse(exactMatch.response), true);
+        if (!shouldBypass) {
+          const exactMatch = await cacheManager.lookupExact(contextHash);
+          if (exactMatch) {
+            return sendResponse(200, formatResponse(exactMatch.response), true);
+          }
         }
 
         // Cache fuzzy lookup
@@ -184,31 +188,38 @@ describe('Relay Proxy Integration Tests', () => {
           const internalResponse = await requestForwarder.forward(chatReq, provider);
 
           // Store cache
-          const entry = {
-            contextHash,
-            response: internalResponse,
-            timestamp: Date.now(),
-            accessCount: 1,
-            lastAccessTime: Date.now(),
-            model: internalResponse.model,
-            inputTokens: 0,
-            outputTokens: 0,
-          };
-          await cacheManager.store(contextHash, entry);
-          fuzzyGuard.store(normalized, contextHash, entry);
+          if (!shouldBypass) {
+            const entry = {
+              contextHash,
+              response: internalResponse,
+              timestamp: Date.now(),
+              accessCount: 1,
+              lastAccessTime: Date.now(),
+              model: internalResponse.model,
+              inputTokens: 0,
+              outputTokens: 0,
+            };
+            await cacheManager.store(contextHash, entry);
+            fuzzyGuard.store(normalized, contextHash, entry);
+            dedupManager.completeRequest(contextHash, internalResponse as any);
+          } else {
+            // Unblock waiters (though there shouldn't be any for bypass)
+            dedupManager.failRequest(contextHash, new Error('Bypassed request failed to complete deduplication correctly'));
+          }
 
-          dedupManager.completeRequest(contextHash, internalResponse as any);
           return sendResponse(200, formatResponse(internalResponse), false);
-        } catch (forwardError) {
-          dedupManager.failRequest(contextHash, forwardError as Error);
-          throw forwardError;
+        } catch (error: any) {
+          if (!shouldBypass) {
+            dedupManager.failRequest(contextHash, error);
+          }
+          return sendResponse(500, { error: error.message }, false);
         }
 
       } catch (error: any) {
         return {
           statusCode: error.statusCode || 500,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ error: error.message || 'Error', code: 'ERROR' }),
+          body: JSON.stringify({ error: error.message || 'Internal server error', code: 'INTERNAL_ERROR' }),
         };
       }
     });
@@ -410,5 +421,36 @@ describe('Relay Proxy Integration Tests', () => {
     expect(res.headers['x-cache']).toBeUndefined(); // Should not have cache headers
     expect(res.body.model).toBe('mock-model');
     expect(mockRequestCount).toBe(1);
+  });
+  it('does not write to cache when temperature > 0 (shouldBypass=true)', async () => {
+    mockRequestCount = 0;
+
+    const body = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'bypass cache test' }],
+      temperature: 0.9,   // triggers shouldBypass
+    });
+
+    // First request — goes upstream
+    const res1 = await fetch(`http://127.0.0.1:${PROXY_PORT}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-key' },
+      body,
+    });
+    expect(res1.status).toBe(200);
+    expect(res1.headers.get('x-cache')).toBe('MISS');
+
+    // Second identical request — must ALSO go upstream (no cache hit)
+    const res2 = await fetch(`http://127.0.0.1:${PROXY_PORT}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-key' },
+      body,
+    });
+    console.log('RES2 HEADERS:', Array.from(res2.headers.entries()));
+    expect(res2.status).toBe(200);
+    expect(res2.headers.get('x-cache')).toBe('MISS');
+
+    // Upstream must have been called exactly twice — nothing was cached
+    expect(mockRequestCount).toBe(2);
   });
 });

@@ -134,7 +134,8 @@ export interface LoggerConfig {
  * Create the base logger instance
  */
 function createBaseLogger(config: LoggerConfig = {}): pino.Logger {
-  const level = config.level || (process.env.LOG_LEVEL as LogLevel) || 'info';
+  const rawLevel = config.level || process.env.LOG_LEVEL || 'info';
+  const level = rawLevel.toLowerCase() as LogLevel;
   const prettyPrint = config.prettyPrint ?? process.env.NODE_ENV !== 'production';
 
   const pinoConfig: pino.LoggerOptions = {

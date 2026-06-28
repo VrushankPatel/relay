@@ -111,6 +111,13 @@ async function main(): Promise<void> {
     const healthMonitor = new HealthMonitor();
     const metricsCollector = new MetricsCollector();
 
+    // 2.5 Initialize StatsStore and Pricing
+    const { loadPricing, calculateCost } = await import('./utils/pricing.js');
+    const pricingMap = await loadPricing([provider]);
+    const { StatsStore } = await import('./components/StatsStore.js');
+    const statsStore = new StatsStore(path.join(os.homedir(), '.relay', 'stats.json'));
+    await statsStore.initialize();
+
     // 3. Setup Health Monitoring
     healthMonitor.registerComponent('CacheManager', async () => {
       cacheManager.getStatistics();
@@ -138,6 +145,14 @@ async function main(): Promise<void> {
       const prometheus = metricsCollector.exportPrometheus();
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end(prometheus);
+    });
+
+    gateway.registerRoute('GET', '/dashboard', async (req, res) => {
+      if (!checkAdminAuth(req, res)) return;
+      const { generateDashboardHTML } = await import('./utils/dashboard.js');
+      const html = generateDashboardHTML(statsStore.getStats(), config);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
     });
 
     const checkAdminAuth = (req: http.IncomingMessage, res: http.ServerResponse): boolean => {
@@ -234,11 +249,18 @@ async function main(): Promise<void> {
       const startTime = Date.now();
       const pathUrl = req.request.url || '/v1/chat/completions';
       
-      const sendResponse = (status: number, data: unknown, cached: boolean, isStream = false): HTTPResponse => {
-        metricsCollector.recordRequest(status, cached, Date.now() - startTime, 'unknown');
+      const sendResponse = (statusCode: number, data: unknown, cached: boolean, isStream = false): HTTPResponse => {
+        console.log('SEND RESPONSE:', { isCacheHit: cached, stream: isStream, statusCode });
+        metricsCollector.recordRequest(statusCode, cached, Date.now() - startTime, 'unknown');
         return {
-          statusCode: status,
-          headers: { 'Content-Type': isStream ? 'text/event-stream' : 'application/json', ...(cached ? { 'X-Cache': 'HIT' } : { 'X-Cache': 'MISS' }) },
+          statusCode: statusCode,
+          headers: { 
+            'Content-Type': isStream ? 'text/event-stream' : 'application/json', 
+            ...(cached ? { 'X-Cache': 'HIT' } : { 'X-Cache': 'MISS' }),
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          },
           body: (isStream || typeof data === 'string') ? data as string | AsyncIterable<string> : JSON.stringify(data),
         };
       };
@@ -302,6 +324,7 @@ async function main(): Promise<void> {
         };
 
         const shouldBypass = cacheManager.shouldBypassCache(normalized);
+        console.log('DEBUG_BYPASS:', { temperature: normalized.temperature, shouldBypass });
 
         // B. Cache Lookup
         if (!shouldBypass) {
@@ -309,9 +332,14 @@ async function main(): Promise<void> {
             const exactMatch = await cacheManager.lookupExact(contextHash);
           if (exactMatch) {
             log.info('Cache hit (exact)');
+            const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
+            const resTokens = tokenAnalyzer.countResponseTokens(exactMatch.response);
+            const costSaved = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
             if (chatReq.stream) {
+              statsStore.recordCacheHit(provider.id, false, costSaved, true);
               return sendResponse(200, replayCacheStream(exactMatch.response), true, true);
             }
+            statsStore.recordCacheHit(provider.id, false, costSaved, false);
             return sendResponse(200, formatResponse(exactMatch.response), true, false);
           }
           } catch (e) {
@@ -323,9 +351,14 @@ async function main(): Promise<void> {
             const similarMatch = fuzzyGuard.lookup(normalized, contextHash);
             if (similarMatch) {
               log.info('Cache hit (fuzzy)');
+              const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
+              const resTokens = tokenAnalyzer.countResponseTokens(similarMatch.response);
+              const costSaved = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
               if (chatReq.stream) {
+                statsStore.recordCacheHit(provider.id, true, costSaved, true);
                 return sendResponse(200, replayCacheStream(similarMatch.response), true, true);
               }
+              statsStore.recordCacheHit(provider.id, true, costSaved, false);
               return sendResponse(200, formatResponse(similarMatch.response), true, false);
             }
           } catch (e) {
@@ -336,11 +369,18 @@ async function main(): Promise<void> {
           // C. Deduplication
           if (dedupManager.isDuplicate(contextHash)) {
             log.info('Deduplicated request');
+            const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
             if (chatReq.stream) {
+              // For streams, we only know input tokens upfront
+              const costSaved = calculateCost(chatReq.model, reqTokens, 0, pricingMap);
+              statsStore.recordDedup(provider.id, costSaved);
               return sendResponse(200, dedupManager.waitForStream(contextHash), true, true);
             } else {
               const dedupResponse = await dedupManager.waitForCompletion(contextHash);
               if (dedupResponse !== PROMOTE_TO_PRIMARY) {
+                const resTokens = tokenAnalyzer.countResponseTokens(dedupResponse as InternalChatResponse);
+                const costSaved = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
+                statsStore.recordDedup(provider.id, costSaved);
                 return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true, false);
               }
               log.info('Waiter promoted to primary, executing upstream call');
@@ -395,6 +435,17 @@ async function main(): Promise<void> {
                   } catch (e) {
                     log.warn({ error: e }, 'Cache stream assembly/store failed');
                   }
+                  if (chunks.length > 0) {
+                    try {
+                      const internalResponse = provider.assembleStream(chunks);
+                      const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
+                      const resTokens = tokenAnalyzer.countResponseTokens(internalResponse);
+                      const cost = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
+                      statsStore.recordCacheMiss(provider.id, cost, true);
+                    } catch (e) {
+                      log.warn({ error: e }, 'Failed to record stream cache miss stats');
+                    }
+                  }
                 }
               } catch (forwardError: any) {
                 dedupManager.failRequest(contextHash, forwardError);
@@ -405,30 +456,34 @@ async function main(): Promise<void> {
           } else {
             const internalResponse = await requestForwarder.forward(chatReq, provider);
 
-          // E. Cache Store
-          try {
-            const entry = {
-              contextHash,
-              response: internalResponse,
-              timestamp: Date.now(),
-              accessCount: 1,
-              lastAccessTime: Date.now(),
-              model: internalResponse.model,
-              inputTokens: internalResponse.usage?.prompt_tokens || 0,
-              outputTokens: internalResponse.usage?.completion_tokens || 0,
-            };
-            await cacheManager.store(contextHash, entry);
-            if (config.fuzzyCache?.enabled) {
-              fuzzyGuard.store(normalized, contextHash, entry);
-            }
-          } catch (e) {
-            log.warn({ error: e }, 'Cache store failed');
-          }
-
+          // E. Cache Store (only when caching is not bypassed)
           if (!shouldBypass) {
+            try {
+              const entry = {
+                contextHash,
+                response: internalResponse,
+                timestamp: Date.now(),
+                accessCount: 1,
+                lastAccessTime: Date.now(),
+                model: internalResponse.model,
+                inputTokens: internalResponse.usage?.prompt_tokens || 0,
+                outputTokens: internalResponse.usage?.completion_tokens || 0,
+              };
+              await cacheManager.store(contextHash, entry);
+              if (config.fuzzyCache?.enabled) {
+                fuzzyGuard.store(normalized, contextHash, entry);
+              }
+            } catch (e) {
+              log.warn({ error: e }, 'Cache store failed');
+            }
+
             dedupManager.completeRequest(contextHash, internalResponse as any);
           }
           log.info('Cache miss - forwarded to provider');
+          const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
+          const resTokens = tokenAnalyzer.countResponseTokens(internalResponse);
+          const cost = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
+          statsStore.recordCacheMiss(provider.id, cost, false);
           return sendResponse(200, formatResponse(internalResponse), false, false);
           }
         } catch (forwardError) {

@@ -56,7 +56,30 @@ The proxy will be available at `http://localhost:8080`.
 
 **Note:** The current Docker image includes all `v4` features, including robust encrypted cache persistence (AES-256-GCM) and streaming chunk multicast deduplication. The final image size is extremely lightweight (`~73MB` content size) and is based on `node:20-alpine`.
 
-## Installation (Node)
+## Installation
+
+### Verify Releases (Recommended)
+
+Relay provides cryptographic checksums and immutable Docker digests to ensure release integrity. This ensures the binary or image you run has not been tampered with.
+
+**For Binaries:**
+1. Download the binary for your platform and the `CHECKSUMS.sha256` file from the [GitHub Releases](https://github.com/VrushankPatel/relay/releases) page.
+2. Verify the checksum:
+   ```bash
+   # macOS
+   shasum -a 256 -c CHECKSUMS.sha256
+
+   # Linux
+   sha256sum -c CHECKSUMS.sha256
+   ```
+
+**For Docker:**
+Instead of pulling the mutable `latest` tag, pull by the exact SHA-256 digest listed on the GHCR package page:
+```bash
+docker pull ghcr.io/vrushankpatel/relay@sha256:<digest>
+```
+
+### Installation (Node)
 
 If you prefer running natively without Docker, you can configure and build the application.
 

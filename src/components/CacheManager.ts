@@ -54,7 +54,7 @@ export class CacheManager implements ICacheManager {
     this.ttlMilliseconds = ttlHours * 60 * 60 * 1000;
     this.cacheDirectory = cacheDirectory;
     this.encryptCache = encryptCache;
-    this.cacheSecret = process.env.RELAY_CACHE_SECRET || 'default-relay-cache-secret';
+    this.cacheSecret = process.env.RELAY_CACHE_SECRET || '';
   }
 
   async initialize(): Promise<void> {
@@ -62,6 +62,28 @@ export class CacheManager implements ICacheManager {
       await fs.mkdir(this.cacheDirectory, { recursive: true });
     } catch (err) {
       // Ignore if exists
+    }
+
+    if (this.encryptCache && !this.cacheSecret) {
+      const crypto = await import('crypto');
+      const { getLogger } = await import('../utils/logger.js');
+      const secretPath = path.join(this.cacheDirectory, '..', 'cache_secret');
+      
+      try {
+        const existingSecret = await fs.readFile(secretPath, 'utf-8');
+        this.cacheSecret = existingSecret.trim();
+        if (this.cacheSecret.length > 0) {
+          getLogger().warn('Using auto-generated, machine-local cache secret from ' + secretPath + '. In shared or production environments, explicitly set RELAY_CACHE_SECRET and back it up.');
+        }
+      } catch (err: any) {
+        if (err.code === 'ENOENT') {
+          this.cacheSecret = crypto.randomBytes(32).toString('hex');
+          await fs.writeFile(secretPath, this.cacheSecret, { mode: 0o600 });
+          getLogger().warn('Generated new machine-local cache secret at ' + secretPath + '. In shared or production environments, explicitly set RELAY_CACHE_SECRET and back it up to avoid losing access to encrypted cache.');
+        } else {
+          throw err;
+        }
+      }
     }
   }
 

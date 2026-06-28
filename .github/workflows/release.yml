@@ -69,9 +69,9 @@ jobs:
         run: |
           if [ -d artifacts ]; then
             cd artifacts
-            sha256sum relay-* relay-*.exe 2>/dev/null | tee checksums.txt || true
+            sha256sum relay-* relay-*.exe 2>/dev/null | tee CHECKSUMS.sha256 || true
           else
-            echo "No artifacts to checksum" | tee checksums.txt
+            echo "No artifacts to checksum" | tee CHECKSUMS.sha256
           fi
 
       - name: Create Release
@@ -86,11 +86,11 @@ jobs:
 
             | Platform | Binary | Checksum |
             |---|---|---|
-            | macOS (Apple Silicon) | `relay-macos-arm64` | See `checksums.txt` |
-            | macOS (Intel) | `relay-macos-x64` | See `checksums.txt` |
-            | Linux (x64) | `relay-linux-x64` | See `checksums.txt` |
-            | Linux (arm64) | `relay-linux-arm64` | See `checksums.txt` |
-            | Windows (x64) | `relay-windows-x64.exe` | See `checksums.txt` |
+            | macOS (Apple Silicon) | `relay-macos-arm64` | See `CHECKSUMS.sha256` |
+            | macOS (Intel) | `relay-macos-x64` | See `CHECKSUMS.sha256` |
+            | Linux (x64) | `relay-linux-x64` | See `CHECKSUMS.sha256` |
+            | Linux (arm64) | `relay-linux-arm64` | See `CHECKSUMS.sha256` |
+            | Windows (x64) | `relay-windows-x64.exe` | See `CHECKSUMS.sha256` |
 
             ### Installation
 
@@ -106,6 +106,6 @@ jobs:
             See [USAGE.md](https://github.com/VrushankPatel/relay/blob/main/USAGE.md) for the full guide.
           files: |
             artifacts/relay-*
-            artifacts/checksums.txt
+            artifacts/CHECKSUMS.sha256
           draft: false
           prerelease: false

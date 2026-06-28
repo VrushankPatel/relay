@@ -14,6 +14,31 @@ npm install
 npm run build
 ```
 
+### Verifying Releases (Security)
+
+When downloading a pre-built binary or Docker image from GitHub Releases, it is critical to verify that the artifact has not been tampered with. Relay provides out-of-band checksum verification to ensure the integrity of your download.
+
+The `CHECKSUMS.sha256` file is generated at build time in our CI pipeline and is attached directly to the release asset. **It is never committed to the repository.** This security model ensures that a compromised commit cannot trivially swap both the malicious binary and its checksum together.
+
+**To verify a binary download:**
+1. Download both the binary for your platform and the `CHECKSUMS.sha256` file from the same release.
+2. Run the checksum verification command:
+
+   ```bash
+   # macOS
+   shasum -a 256 -c CHECKSUMS.sha256
+
+   # Linux
+   sha256sum -c CHECKSUMS.sha256
+   ```
+
+**To verify a Docker image:**
+Instead of pulling the mutable `latest` or `version` tags (which could potentially be moved), pull the image by its immutable SHA-256 digest. You can find the digest on the GHCR package page or via the `gh` CLI for a specific release.
+
+```bash
+docker pull ghcr.io/vrushankpatel/relay@sha256:<digest>
+```
+
 ## Provider Configuration
 
 You can configure your chosen upstream LLM provider either in your `config.yaml` or entirely via environment variables (recommended for Docker).
