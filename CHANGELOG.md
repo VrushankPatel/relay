@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.1] - Docker Support & Client Integrations
+## [2.0.1] - 2026-06-28
 
 ### Added
 - **Docker Support**: Added multi-stage `Dockerfile` and `docker-compose.yml` for zero-install, containerized deployments. Persists OAuth device flow tokens across restarts.

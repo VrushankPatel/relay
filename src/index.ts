@@ -6,7 +6,7 @@ import { initializeLogger, createChildLogger } from './utils/logger.js';
 import { RequestProcessor } from './components/RequestProcessor.js';
 import { CacheManager } from './components/CacheManager.js';
 import { FuzzyGuard } from './components/FuzzyGuard.js';
-import { DeduplicationManager } from './components/DeduplicationManager.js';
+import { DeduplicationManager, PROMOTE_TO_PRIMARY } from './components/DeduplicationManager.js';
 import { TokenAnalyzer } from './components/TokenAnalyzer.js';
 import { RequestForwarder } from './components/RequestForwarder.js';
 import { HealthMonitor, SERVICE_VERSION } from './components/HealthMonitor.js';
@@ -139,6 +139,72 @@ async function main(): Promise<void> {
       res.end(prometheus);
     });
 
+    const checkAdminAuth = (req: http.IncomingMessage, res: http.ServerResponse): boolean => {
+      if (config.security?.apiKey) {
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.replace(/^Bearer\s+/i, '');
+        if (token !== config.security.apiKey) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized', code: 'UNAUTHORIZED' }));
+          return false;
+        }
+      }
+      return true;
+    };
+
+    gateway.registerRoute('GET', '/diagnostics', async (req, res) => {
+      if (!checkAdminAuth(req, res)) return;
+
+      const obfuscate = (val?: string) => {
+        if (!val) return val;
+        if (val.length <= 6) return '******';
+        return val.substring(0, 3) + '*'.repeat(val.length - 6) + val.substring(val.length - 3);
+      };
+
+      const rawConfig = configManager.getCurrentConfig();
+      const cleanConfig = JSON.parse(JSON.stringify(rawConfig));
+      if (cleanConfig.security?.apiKey) {
+        cleanConfig.security.apiKey = obfuscate(cleanConfig.security.apiKey);
+      }
+      if (cleanConfig.provider?.apiKey) {
+        cleanConfig.provider.apiKey = obfuscate(cleanConfig.provider.apiKey);
+      }
+
+      const cacheStats = cacheManager.getStatistics();
+      const poolStats = requestForwarder.getPoolStats();
+      const cumulativeSavings = tokenAnalyzer.getCumulativeSavings();
+
+      sendJson(res, 200, {
+        version: SERVICE_VERSION,
+        config: cleanConfig,
+        cache: cacheStats,
+        connectionPool: poolStats,
+        credits: {
+          cumulativeSavings,
+        }
+      });
+    });
+
+    gateway.registerRoute('POST', '/cache/invalidate', async (req, res) => {
+      if (!checkAdminAuth(req, res)) return;
+
+      try {
+        const count = await cacheManager.invalidate();
+        if (config.fuzzyCache?.enabled || config.similarity?.enabled) {
+          fuzzyGuard.clear();
+        }
+        sendJson(res, 200, {
+          status: 'success',
+          invalidatedCount: count,
+        });
+      } catch (error: any) {
+        sendJson(res, 500, {
+          error: error.message || 'Failed to invalidate cache',
+          code: 'INTERNAL_ERROR',
+        });
+      }
+    });
+
     // 5. Authentication
     gateway.setAuthenticator(async (apiKey) => {
       if (config.security?.apiKey) {
@@ -261,11 +327,14 @@ async function main(): Promise<void> {
             return sendResponse(200, dedupManager.waitForStream(contextHash), true, true);
           } else {
             const dedupResponse = await dedupManager.waitForCompletion(contextHash);
-            return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true, false);
+            if (dedupResponse !== PROMOTE_TO_PRIMARY) {
+              return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true, false);
+            }
+            log.info('Waiter promoted to primary, executing upstream call');
           }
+        } else {
+          await dedupManager.registerRequest(contextHash, chatReq.stream);
         }
-
-        await dedupManager.registerRequest(contextHash, chatReq.stream);
 
         // D. Forward
         try {

@@ -89,6 +89,20 @@ describe('Relay Proxy Integration Tests', () => {
     
     gateway = new APIGatewayImpl(100, 5000);
     gateway.setAuthenticator(async () => true);
+
+    gateway.registerRoute('GET', '/diagnostics', async (_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        version: '1.0.0',
+        cache: cacheManager.getStatistics()
+      }));
+    });
+
+    gateway.registerRoute('POST', '/cache/invalidate', async (_req, res) => {
+      const count = await cacheManager.invalidate();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'success', invalidatedCount: count }));
+    });
     
     gateway.setRequestHandler(async (req) => {
       const startTime = Date.now();
@@ -330,5 +344,47 @@ describe('Relay Proxy Integration Tests', () => {
     expect(res2.statusCode).toBe(200);
     expect(res2.headers['x-cache']).toBe('HIT');
     expect(res2.body.candidates[0].content.parts[0].text).toBe('Mock response');
+  });
+
+  it('6. Admin Endpoints: diagnostics and cache invalidation', async () => {
+    // 1. Diagnostics endpoint
+    const diagRes = await new Promise<any>((resolve) => {
+      http.get(`http://127.0.0.1:${PROXY_PORT}/diagnostics`, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk.toString());
+        res.on('end', () => resolve({ statusCode: res.statusCode, body: JSON.parse(body) }));
+      });
+    });
+    expect(diagRes.statusCode).toBe(200);
+    expect(diagRes.body.version).toBe('1.0.0');
+    expect(diagRes.body.cache.size).toBeGreaterThanOrEqual(1);
+
+    // 2. Invalidate cache endpoint
+    const invalidateRes = await new Promise<any>((resolve) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: PROXY_PORT,
+        path: '/cache/invalidate',
+        method: 'POST'
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk.toString());
+        res.on('end', () => resolve({ statusCode: res.statusCode, body: JSON.parse(body) }));
+      });
+      req.end();
+    });
+    expect(invalidateRes.statusCode).toBe(200);
+    expect(invalidateRes.body.status).toBe('success');
+    expect(invalidateRes.body.invalidatedCount).toBeGreaterThanOrEqual(1);
+
+    // 3. Diagnostics after invalidation
+    const postDiagRes = await new Promise<any>((resolve) => {
+      http.get(`http://127.0.0.1:${PROXY_PORT}/diagnostics`, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk.toString());
+        res.on('end', () => resolve({ statusCode: res.statusCode, body: JSON.parse(body) }));
+      });
+    });
+    expect(postDiagRes.body.cache.size).toBe(0);
   });
 });

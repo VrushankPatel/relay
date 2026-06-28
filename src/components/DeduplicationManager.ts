@@ -1,6 +1,8 @@
 import { createChildLogger } from '../utils/logger.js';
 import type { Logger } from 'pino';
 
+export const PROMOTE_TO_PRIMARY = Symbol('PROMOTE_TO_PRIMARY');
+
 const DEFAULT_COALESCE_WINDOW_MS = 1000;
 const CLEANUP_DELAY_MS = 100;
 
@@ -41,7 +43,7 @@ export interface IDeduplicationManager<T = any, C = any> {
   isDuplicate(contextHash: string): boolean;
   registerRequest(contextHash: string, isStream?: boolean): Promise<void>;
   
-  waitForCompletion(contextHash: string): Promise<T>;
+  waitForCompletion(contextHash: string): Promise<T | typeof PROMOTE_TO_PRIMARY>;
   completeRequest(contextHash: string, response: T): void;
   
   waitForStream(contextHash: string): AsyncIterable<C>;
@@ -122,7 +124,7 @@ export class DeduplicationManager<T = any, C = any> implements IDeduplicationMan
     );
   }
   
-  async waitForCompletion(contextHash: string): Promise<T> {
+  async waitForCompletion(contextHash: string): Promise<T | typeof PROMOTE_TO_PRIMARY> {
     const inFlight = this.inFlightRequests.get(contextHash);
     
     if (!inFlight) {
@@ -379,7 +381,9 @@ export class DeduplicationManager<T = any, C = any> implements IDeduplicationMan
       
       if (nextWaiter) {
         if (inFlight.reject) {
-          inFlight.reject(error);
+          try {
+            inFlight.reject(error);
+          } catch (e) {}
         }
 
         inFlight.startTime = Date.now();
@@ -387,10 +391,8 @@ export class DeduplicationManager<T = any, C = any> implements IDeduplicationMan
         delete inFlight.response;
         delete inFlight.error;
 
-        inFlight.resolve = nextWaiter.resolve;
-        inFlight.reject = nextWaiter.reject;
-        inFlight.promise = new Promise<T>(() => {});
-        inFlight.promise.catch(() => {});
+        // Resolve next waiter with the promotion token so they proceed with their own request
+        nextWaiter.resolve(PROMOTE_TO_PRIMARY as any);
 
         this.logger.debug(
           {

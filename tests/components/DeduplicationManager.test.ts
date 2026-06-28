@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DeduplicationManager } from '../../src/components/DeduplicationManager.js';
+import { DeduplicationManager, PROMOTE_TO_PRIMARY } from '../../src/components/DeduplicationManager.js';
 import { CopilotResponse } from '../../src/types/copilot.js';
 
 describe('DeduplicationManager', () => {
@@ -371,8 +371,11 @@ describe('DeduplicationManager', () => {
       // Fail the primary request
       dedup.failRequest(hash, error);
       
-      // The first waiter should have been rejected, but request is still in-flight
-      // (second waiter became the new primary)
+      // The first waiter should receive the promotion signal
+      const result1 = await waiter1;
+      expect(result1).toBe(PROMOTE_TO_PRIMARY);
+      
+      // Request is still in-flight
       expect(dedup.isDuplicate(hash)).toBe(true);
       
       // Complete the new primary request
@@ -485,7 +488,10 @@ describe('DeduplicationManager', () => {
       // Fail the primary request
       dedup.failRequest(hash, error);
       
-      // First waiter becomes the new primary
+      // First waiter becomes the new primary and receives the promotion signal
+      const result1 = await waiter1;
+      expect(result1).toBe(PROMOTE_TO_PRIMARY);
+      
       // Request should still be in-flight with remaining waiters
       expect(dedup.isDuplicate(hash)).toBe(true);
       
