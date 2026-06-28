@@ -1,10 +1,289 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn } from 'child_process';
 import http from 'http';
+import { APIGatewayImpl } from '../../src/components/APIGateway.js';
+import { ConfigurationManager } from '../../src/components/ConfigurationManager.js';
+import { CacheManager } from '../../src/components/CacheManager.js';
+import { FuzzyGuard } from '../../src/components/FuzzyGuard.js';
+import { DeduplicationManager } from '../../src/components/DeduplicationManager.js';
+import { RequestForwarder } from '../../src/components/RequestForwarder.js';
+import { CompatibilityLayer } from '../../src/components/CompatibilityLayer.js';
+import { RequestProcessor } from '../../src/components/RequestProcessor.js';
+import { GenericProvider } from '../../src/providers/GenericProvider.js';
+import { MetricsCollector } from '../../src/components/MetricsCollector.js';
+import { TokenAnalyzer } from '../../src/components/TokenAnalyzer.js';
+import { createChildLogger } from '../../src/utils/logger.js';
+import type { InternalChatRequest, InternalChatResponse } from '../../src/types/chat.js';
 
 describe('Relay Proxy Integration Tests', () => {
-  // We skip these for now in CI to avoid binding ports and needing full config
-  it.skip('starts and stops correctly', () => {
-    expect(true).toBe(true);
+  let mockServer: http.Server;
+  let mockPort = 0;
+  let mockRequestCount = 0;
+  let mockRequests: any[] = [];
+  let mockResponseDelay = 0;
+
+  let gateway: APIGatewayImpl;
+  const PROXY_PORT = 39881;
+
+  beforeAll(async () => {
+    // Setup Mock Upstream Server
+    mockServer = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => body += chunk.toString());
+      req.on('end', () => {
+        mockRequestCount++;
+        const parsed = body ? JSON.parse(body) : {};
+        mockRequests.push(parsed);
+
+        const sendResponse = () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'mock-resp-1',
+            model: parsed.model || 'mock-model',
+            choices: [
+              { index: 0, message: { role: 'assistant', content: 'Mock response' }, finish_reason: 'stop' }
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+            created: Date.now()
+          }));
+        };
+
+        if (mockResponseDelay > 0) {
+          setTimeout(sendResponse, mockResponseDelay);
+        } else {
+          sendResponse();
+        }
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      mockServer.listen(0, '127.0.0.1', () => {
+        mockPort = (mockServer.address() as any).port;
+        resolve();
+      });
+    });
+
+    // Setup Relay Proxy components
+    const provider = new GenericProvider({
+      type: 'generic',
+      baseUrl: `http://127.0.0.1:${mockPort}`,
+      isMeteredPerToken: true
+    });
+    await provider.initialize();
+
+    const requestProcessor = new RequestProcessor();
+    const compatibilityLayer = new CompatibilityLayer();
+    const cacheManager = new CacheManager(1000, 1);
+    
+    const fuzzyGuard = new FuzzyGuard({
+      enabled: true,
+      maxTokenEditDistance: 5,
+      maxEntries: 100,
+      rapidEditWindowMs: 5000,
+      rapidEditThreshold: 3, // over 3 distinct requests in 5s kills it
+    });
+    
+    const dedupManager = new DeduplicationManager();
+    const metricsCollector = new MetricsCollector();
+    const tokenAnalyzer = new TokenAnalyzer({ creditMultipliers: {} }, undefined, 90, createChildLogger('test'));
+    const requestForwarder = new RequestForwarder();
+    
+    gateway = new APIGatewayImpl(100, 5000);
+    gateway.setAuthenticator(async () => true);
+    
+    gateway.setRequestHandler(async (req) => {
+      const startTime = Date.now();
+      const pathUrl = req.request.url || '/v1/chat/completions';
+      
+      const sendResponse = (status: number, data: unknown, cached: boolean) => {
+        return {
+          statusCode: status,
+          headers: { 'Content-Type': 'application/json', ...(cached ? { 'X-Cache': 'HIT' } : { 'X-Cache': 'MISS' }) },
+          body: JSON.stringify(data),
+        };
+      };
+
+      try {
+        const chatReq = compatibilityLayer.parseOpenAIChatRequest(req.request.body);
+        const normalized = requestProcessor.normalizeRequest(chatReq);
+        const { contextHash } = requestProcessor.generateContextHash(normalized);
+        
+        const formatResponse = (internalRes: InternalChatResponse): unknown => {
+          return compatibilityLayer.formatOpenAIResponse(internalRes);
+        };
+
+        // Cache exact lookup
+        const exactMatch = await cacheManager.lookupExact(contextHash);
+        if (exactMatch) {
+          return sendResponse(200, formatResponse(exactMatch.response), true);
+        }
+
+        // Cache fuzzy lookup
+        const similarMatch = fuzzyGuard.lookup(normalized, contextHash);
+        if (similarMatch) {
+          return sendResponse(200, formatResponse(similarMatch.response), true);
+        }
+
+        // Deduplication
+        if (dedupManager.isDuplicate(contextHash)) {
+          const dedupResponse = await dedupManager.waitForCompletion(contextHash);
+          return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true);
+        }
+
+        await dedupManager.registerRequest(contextHash);
+
+        // Forward
+        try {
+          const internalResponse = await requestForwarder.forward(chatReq, provider);
+
+          // Store cache
+          const entry = {
+            contextHash,
+            response: internalResponse,
+            timestamp: Date.now(),
+            accessCount: 1,
+            lastAccessTime: Date.now(),
+            model: internalResponse.model,
+            inputTokens: 0,
+            outputTokens: 0,
+          };
+          await cacheManager.store(contextHash, entry);
+          fuzzyGuard.store(normalized, contextHash, entry);
+
+          dedupManager.completeRequest(contextHash, internalResponse as any);
+          return sendResponse(200, formatResponse(internalResponse), false);
+        } catch (forwardError) {
+          dedupManager.failRequest(contextHash, forwardError as Error);
+          throw forwardError;
+        }
+
+      } catch (error: any) {
+        return {
+          statusCode: error.statusCode || 500,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: error.message || 'Error', code: 'ERROR' }),
+        };
+      }
+    });
+
+    await gateway.start('127.0.0.1', PROXY_PORT);
+  });
+
+  afterAll(async () => {
+    await gateway.stop();
+    await new Promise<void>((resolve) => mockServer.close(() => resolve()));
+  });
+
+  const sendPost = (data: any): Promise<{ statusCode: number; headers: any; body: any }> => {
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: PROXY_PORT,
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer test-key'
+        }
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk.toString());
+        res.on('end', () => {
+          resolve({
+            statusCode: res.statusCode || 0,
+            headers: res.headers,
+            body: JSON.parse(body)
+          });
+        });
+      });
+      req.on('error', reject);
+      req.write(JSON.stringify(data));
+      req.end();
+    });
+  };
+
+  it('1. Exact Caching: serves identical requests from cache', async () => {
+    mockRequestCount = 0;
+    const reqData = { model: 'gpt-4o', messages: [{ role: 'user', content: 'this is a completely unique string for exact caching that shares no words' }] };
+
+    const res1 = await sendPost(reqData);
+    expect(res1.statusCode).toBe(200);
+    expect(res1.headers['x-cache']).toBe('MISS');
+    expect(mockRequestCount).toBe(1);
+
+    const res2 = await sendPost(reqData);
+    expect(res2.statusCode).toBe(200);
+    expect(res2.headers['x-cache']).toBe('HIT');
+    expect(mockRequestCount).toBe(1); // Did not increase
+  });
+
+  it('2. Fuzzy Caching: serves slightly different requests from cache', async () => {
+    mockRequestCount = 0;
+    const reqData1 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'a completely different sentence for testing fuzzy logic exclusively' }] };
+    const reqData2 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'a completely different sentence for testing fuzzy logic exclusively!!' }] }; // small diff
+
+    const res1 = await sendPost(reqData1);
+    expect(res1.statusCode).toBe(200);
+    expect(res1.headers['x-cache']).toBe('MISS');
+    expect(mockRequestCount).toBe(1);
+
+    const res2 = await sendPost(reqData2);
+    expect(res2.statusCode).toBe(200);
+    expect(res2.headers['x-cache']).toBe('HIT');
+    expect(mockRequestCount).toBe(1); // Served by FuzzyGuard
+  });
+
+  it('3. Fuzzy Kill Switch: rapid near-identical requests trigger kill switch', async () => {
+    mockRequestCount = 0;
+    // We already have some distinct hashes in the cache from previous tests.
+    // The fuzzy kill switch triggers if we have > 3 distinct requests in the rapidEditWindowMs (5000).
+    // Let's send 4 distinct requests rapidly.
+    const req1 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 1' }] };
+    const req2 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 2' }] };
+    const req3 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 3' }] };
+    const req4 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 4' }] };
+    const req5 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 5' }] }; // This one should be exact match only
+
+    await sendPost(req1); // miss
+    await sendPost(req2); // miss
+    await sendPost(req3); // miss
+    await sendPost(req4); // miss
+    
+    // Kill switch should now be engaged (we've sent 4 requests in rapid succession).
+    // Now if we send a 5th request that is a fuzzy match to req4 (e.g., test 4!), it should MISS because fuzzy is disabled.
+    const req4Fuzzy = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 4!' }] };
+    
+    const countBefore = mockRequestCount;
+    const res5 = await sendPost(req4Fuzzy);
+    
+    expect(res5.statusCode).toBe(200);
+    expect(res5.headers['x-cache']).toBe('MISS'); 
+    expect(mockRequestCount).toBe(countBefore + 1); // Mock server was hit because fuzzy guard was disabled
+  });
+
+  it('4. Concurrent Deduplication: collapses simultaneous identical requests', async () => {
+    mockRequestCount = 0;
+    mockResponseDelay = 100; // Slow down upstream to allow concurrency
+
+    const reqData = { model: 'gpt-4o', messages: [{ role: 'user', content: 'completely distinct dedup test string' }] };
+
+    const [res1, res2, res3] = await Promise.all([
+      sendPost(reqData),
+      sendPost(reqData),
+      sendPost(reqData)
+    ]);
+
+    expect(res1.statusCode).toBe(200);
+    expect(res2.statusCode).toBe(200);
+    expect(res3.statusCode).toBe(200);
+
+    // Only one should be a miss, the others should be hits (served by DedupManager)
+    const hits = [res1, res2, res3].filter(r => r.headers['x-cache'] === 'HIT').length;
+    const misses = [res1, res2, res3].filter(r => r.headers['x-cache'] === 'MISS').length;
+
+    expect(hits).toBe(2);
+    expect(misses).toBe(1);
+    expect(mockRequestCount).toBe(1); // Upstream received exactly 1 request
+
+    mockResponseDelay = 0;
   });
 });

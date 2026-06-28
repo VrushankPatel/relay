@@ -19,6 +19,8 @@ export interface ModelInfo {
   input_cost_per_million: number | null;
   /** Credits per 1 M output tokens. null → unmetered / unknown. */
   output_cost_per_million: number | null;
+  /** ISO date string of when pricing was last verified. */
+  pricingLastVerified?: string;
 }
 
 // ── Provider interface ──────────────────────────────────────────────

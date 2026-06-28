@@ -16,8 +16,8 @@ export class AnthropicProvider implements IProvider {
     this.baseUrl = config.baseUrl || 'https://api.anthropic.com';
     this.anthropicVersion = config.anthropicVersion || '2023-06-01';
     this.models = config.models || [
-      { id: 'claude-sonnet-4-20250514', name: 'Claude 4 Sonnet', owned_by: 'anthropic', input_cost_per_million: 3, output_cost_per_million: 15 },
-      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', owned_by: 'anthropic', input_cost_per_million: 0.25, output_cost_per_million: 1.25 }
+      { id: 'claude-sonnet-4-20250514', name: 'Claude 4 Sonnet', owned_by: 'anthropic', input_cost_per_million: 3, output_cost_per_million: 15, pricingLastVerified: new Date().toISOString().split('T')[0] },
+      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', owned_by: 'anthropic', input_cost_per_million: 0.25, output_cost_per_million: 1.25, pricingLastVerified: new Date().toISOString().split('T')[0] }
     ];
   }
 

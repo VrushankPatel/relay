@@ -30,11 +30,17 @@ export class RequestForwarder implements IRequestForwarder {
   private totalLatency = 0;
   private logger: ReturnType<typeof createChildLogger>;
 
-  private agent: https.Agent;
+  private httpsAgent: https.Agent;
+  private httpAgent: http.Agent;
 
   constructor() {
     this.logger = createChildLogger('RequestForwarder');
-    this.agent = new https.Agent({
+    this.httpsAgent = new https.Agent({
+      keepAlive: true,
+      maxSockets: MAX_SOCKETS,
+      keepAliveMsecs: 120000,
+    });
+    this.httpAgent = new http.Agent({
       keepAlive: true,
       maxSockets: MAX_SOCKETS,
       keepAliveMsecs: 120000,
@@ -126,9 +132,8 @@ export class RequestForwarder implements IRequestForwarder {
       ? Math.round(this.totalLatency / this.totalRequests)
       : 0;
 
-    const activeSockets = this.agent.sockets
-      ? Object.values(this.agent.sockets).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0)
-      : 0;
+    const activeSockets = (this.httpsAgent.sockets ? Object.values(this.httpsAgent.sockets).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0) : 0) +
+                          (this.httpAgent.sockets ? Object.values(this.httpAgent.sockets).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0) : 0);
 
     return {
       totalConnections: MAX_SOCKETS,
@@ -152,16 +157,17 @@ export class RequestForwarder implements IRequestForwarder {
         reject(new Error('API request timed out'));
       }, REQUEST_TIMEOUT_MS);
 
-      const options: https.RequestOptions = {
+      const isHttps = url.protocol === 'https:';
+      const transport = isHttps ? https : http;
+
+      const options: https.RequestOptions | http.RequestOptions = {
         hostname: url.hostname,
-        port: url.port ? parseInt(url.port) : (url.protocol === 'https:' ? 443 : 80),
+        port: url.port ? parseInt(url.port) : (isHttps ? 443 : 80),
         path: url.pathname + url.search,
         method: 'POST',
         headers,
-        agent: this.agent,
+        agent: isHttps ? this.httpsAgent : this.httpAgent,
       };
-
-      const transport = url.protocol === 'https:' ? https : require('http');
 
       upstreamReq = transport.request(options, (upstreamRes: any) => {
         const statusCode = upstreamRes.statusCode || 500;
@@ -233,6 +239,7 @@ export class RequestForwarder implements IRequestForwarder {
   }
 
   destroy(): void {
-    this.agent.destroy();
+    this.httpsAgent.destroy();
+    this.httpAgent.destroy();
   }
 }

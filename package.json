@@ -1,7 +1,7 @@
 {
-  "name": "copilot-token-optimizer-proxy",
-  "version": "1.0.0",
-  "description": "GitHub Copilot Token Optimizer Proxy - Reduces token consumption through intelligent caching",
+  "name": "relay",
+  "version": "2.0.0",
+  "description": "Provider agnostic LLM caching and deduplication proxy for OpenAI, Anthropic, and Copilot Business/Enterprise",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -19,10 +19,12 @@
     "bin:win": "npm run build && pkg dist/index.js --targets node22-win-x64 --output bin/relay-windows-x64.exe"
   },
   "keywords": [
-    "github-copilot",
+    "llm",
     "proxy",
-    "token-optimization",
-    "caching"
+    "caching",
+    "cost-optimization",
+    "openai",
+    "anthropic"
   ],
   "author": "",
   "license": "MIT",
