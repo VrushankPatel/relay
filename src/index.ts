@@ -165,8 +165,23 @@ async function main(): Promise<void> {
       try {
         let chatReq: InternalChatRequest;
         
+        let pathname = '';
+        try {
+          const parsedUrl = new URL(pathUrl, 'http://localhost');
+          pathname = parsedUrl.pathname;
+        } catch (e) {
+          pathname = pathUrl;
+        }
+
+        const geminiMatch = pathname.match(/^\/v1(beta)?\/models\/([^/:]+):(streamG|g)enerateContent$/);
+        const isGemini = Boolean(geminiMatch);
+
         // A. Parse Request
-        if (pathUrl === '/v1/completions') {
+        if (isGemini) {
+          const model = geminiMatch![2];
+          const isStream = geminiMatch![3] === 'streamG';
+          chatReq = compatibilityLayer.parseGeminiRequest(req.request.body, model, isStream);
+        } else if (pathUrl === '/v1/completions') {
           chatReq = compatibilityLayer.parseOpenAICompletionRequest(req.request.body);
         } else if (pathUrl === '/v1/messages') {
           chatReq = compatibilityLayer.parseAnthropicRequest(req.request.body);
@@ -179,6 +194,9 @@ async function main(): Promise<void> {
         log.debug({ contextHash: contextHash.substring(0, 16) }, 'Context hash generated');
 
         const formatResponse = (internalRes: InternalChatResponse): unknown => {
+          if (isGemini) {
+            return compatibilityLayer.formatGeminiResponse(internalRes);
+          }
           if (pathUrl === '/v1/messages') {
             return compatibilityLayer.formatAnthropicResponse(internalRes);
           }
@@ -193,10 +211,18 @@ async function main(): Promise<void> {
             // If requested stream but cache is complete object, we could theoretically synthesize SSE.
             // For now, we return it. (If they want real stream synthesis from cache, we'd do it here).
             // But returning the JSON is often acceptable if the IDE handles both. Let's assume JSON is fine or we synthesize:
-            if (chatReq.stream && pathUrl !== '/v1/messages') {
-              // Synthesize OpenAI stream
-              const streamData = `data: ${JSON.stringify(formatResponse(exactMatch.response))}\n\ndata: [DONE]\n\n`;
-              return sendResponse(200, streamData, true, true);
+            if (chatReq.stream) {
+              if (isGemini) {
+                const streamData = compatibilityLayer.formatGeminiStreamChunk({
+                  content: exactMatch.response.choices[0].message.content,
+                  finishReason: exactMatch.response.choices[0].finish_reason
+                });
+                return sendResponse(200, streamData, true, true);
+              } else if (pathUrl !== '/v1/messages') {
+                // Synthesize OpenAI stream
+                const streamData = `data: ${JSON.stringify(formatResponse(exactMatch.response))}\n\ndata: [DONE]\n\n`;
+                return sendResponse(200, streamData, true, true);
+              }
             }
             return sendResponse(200, formatResponse(exactMatch.response), true, false);
           }
@@ -209,9 +235,17 @@ async function main(): Promise<void> {
             const similarMatch = fuzzyGuard.lookup(normalized, contextHash);
             if (similarMatch) {
               log.info('Cache hit (fuzzy)');
-              if (chatReq.stream && pathUrl !== '/v1/messages') {
-                const streamData = `data: ${JSON.stringify(formatResponse(similarMatch.response))}\n\ndata: [DONE]\n\n`;
-                return sendResponse(200, streamData, true, true);
+              if (chatReq.stream) {
+                if (isGemini) {
+                  const streamData = compatibilityLayer.formatGeminiStreamChunk({
+                    content: similarMatch.response.choices[0].message.content,
+                    finishReason: similarMatch.response.choices[0].finish_reason
+                  });
+                  return sendResponse(200, streamData, true, true);
+                } else if (pathUrl !== '/v1/messages') {
+                  const streamData = `data: ${JSON.stringify(formatResponse(similarMatch.response))}\n\ndata: [DONE]\n\n`;
+                  return sendResponse(200, streamData, true, true);
+                }
               }
               return sendResponse(200, formatResponse(similarMatch.response), true, false);
             }
@@ -242,8 +276,13 @@ async function main(): Promise<void> {
                 const stream = requestForwarder.forwardStream(chatReq, provider);
                 for await (const chunk of stream) {
                   chunks.push(chunk);
-                  dedupManager.addStreamChunk(contextHash, chunk);
-                  yield chunk;
+                  let clientChunk = chunk;
+                  if (isGemini) {
+                    const parsedProviderChunk = compatibilityLayer.parseProviderStreamChunk(chunk, provider.id);
+                    clientChunk = compatibilityLayer.formatGeminiStreamChunk(parsedProviderChunk);
+                  }
+                  dedupManager.addStreamChunk(contextHash, clientChunk);
+                  yield clientChunk;
                 }
                 dedupManager.completeStream(contextHash);
 

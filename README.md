@@ -65,13 +65,26 @@ If you prefer running natively without Docker:
 
 ## Architecture
 
-Relay acts as a transparent proxy between your LLM clients and the upstream providers. 
+Relay acts as a transparent proxy between your LLM clients and the upstream providers:
 
-```
-Client (App, LangChain, etc.) -> Relay Proxy (Cache, Deduplication, Metrics) -> Provider (OpenAI, Anthropic, etc.)
-```
+![Relay Architecture](./docs/assets/relay_architecture.png)
 
-The Provider abstraction allows Relay to cleanly support multiple upstream APIs while providing a uniform local endpoint.
+The provider translation layer allows Relay to cleanly support multiple upstream APIs while presenting a uniform local endpoint.
+
+## Client Tool Support
+
+Relay natively integrates with standard AI client tools:
+
+| Client Tool | Auth Mode | Status | Setup Walkthrough |
+|-------------|-----------|--------|-------------------|
+| **Claude Code** | API Key (`ANTHROPIC_AUTH_TOKEN`) | ✅ Supported | [USAGE.md Guide](./USAGE.md#1-claude-code-cli) |
+| **OpenCode** | API Key (`opencode.openai.apiKey`) | ✅ Supported | [USAGE.md Guide](./USAGE.md#2-opencode) |
+| **Google Gemini CLI** | API Key (`GEMINI_BASE_URL`) | ✅ Supported | [USAGE.md Guide](./USAGE.md#5-google-gemini-cli) |
+| **Cline** | API Key (OpenAI Compatible) | ✅ Supported | [USAGE.md Guide](./USAGE.md#3-cline-vs-code-extension) |
+| **Aider** | API Key (`OPENAI_API_BASE`) | ✅ Supported | [USAGE.md Guide](./USAGE.md#4-aider) |
+| **GitHub Copilot CLI** | N/A | ❌ Not Possible | [COMPLIANCE.md Notice](./COMPLIANCE.md#explicit-non-targets) |
+| **Kiro** | N/A | ⏳ Deferred | [COMPLIANCE.md Notice](./COMPLIANCE.md#explicit-non-targets) |
+| **Antigravity CLI** | N/A | ⏳ Deferred | [COMPLIANCE.md Notice](./COMPLIANCE.md#explicit-non-targets) |
 
 ## ⚠️ GitHub Copilot Notice
 

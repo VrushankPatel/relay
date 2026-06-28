@@ -62,54 +62,117 @@ provider:
   requireConsent: true
 ```
 
-## Client Configuration
+## Client Configuration & Tool Integration
 
-To use Relay, you point your LLM clients to the Relay proxy instead of the default provider API.
+To redirect standard client tools through Relay, you configure them to point to Relay's server address (default `http://localhost:8080`).
 
-### Python (openai library)
+### 1. Claude Code CLI
 
-```python
-from openai import OpenAI
+Claude Code officially supports connecting via a gateway using environment variables.
 
-# Point to Relay running on localhost
-client = OpenAI(
-    base_url='http://localhost:3000/v1',
-    api_key='your-relay-api-key' # If configured in Relay, otherwise 'dummy'
-)
-```
-
-### LangChain / LlamaIndex / Aider / Continue.dev
-
-Configure the custom base URL in the respective tool to point to `http://localhost:3000/v1`.
-
-### cURL
+To start Claude Code through Relay (configured with the Anthropic provider backend):
 
 ```bash
-curl http://localhost:3000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
+# Point Claude Code to Relay's API Gateway
+export ANTHROPIC_BASE_URL="http://localhost:8080/v1"
+# Set your Relay API key (if configured in security.apiKey), or use dummy
+export ANTHROPIC_AUTH_TOKEN="your-relay-api-key"
+
+# Run Claude Code normally
+claude
 ```
+
+> [!IMPORTANT]
+> **Subscription Limitation:** This gateway redirection only works when Claude Code is billed via direct **Anthropic API Keys** (developer Console pay-as-you-go). It does **NOT** function when you are logged into Claude Code via a web browser session linked to a **Claude Pro/Team/Max** subscription, because those subscription models do not route requests through standard API gateway endpoints.
+
+---
+
+### 2. OpenCode
+
+OpenCode accepts any custom OpenAI-compatible endpoint. You can configure it via your global or project `settings.json` config:
+
+```json
+{
+  "opencode.openai.baseURL": "http://localhost:8080/v1",
+  "opencode.openai.apiKey": "your-relay-api-key",
+  "opencode.openai.model": "gpt-4o"
+}
+```
+
+Repeat requests in OpenCode will serve from Relay's exact or fuzzy cache, reducing API credit charges.
+
+---
+
+### 3. Cline (VS Code Extension)
+
+To configure Cline to use Relay:
+1. Open Cline Settings.
+2. Under **Provider**, select **OpenAI Compatible**.
+3. Set **Base URL** to `http://localhost:8080/v1`.
+4. Enter your Relay API key (or `dummy`).
+5. Choose your target model ID (e.g., `gpt-4o` or `claude-3-5-sonnet`).
+
+---
+
+### 4. Aider
+
+Aider is BYOK (Bring Your Own Key) and model-agnostic. Route Aider through Relay by running:
+
+```bash
+# Redirect Aider through the proxy
+export OPENAI_API_BASE="http://localhost:8080/v1"
+export OPENAI_API_KEY="your-relay-api-key"
+
+# Start Aider
+aider --model gpt-4o
+```
+
+---
+
+### 5. Google Gemini CLI
+
+Relay features native translation support for Google's Gemini API wire format. 
+
+```bash
+# Redirect Gemini CLI to Relay
+export GEMINI_BASE_URL="http://localhost:8080"
+
+# Execute commands using an API key
+gemini --api-key="your-relay-api-key" "Explain quantum computing in three sentences"
+```
+
+> [!WARNING]
+> **OAuth Caveat:** Gemini CLI redirection only functions when configured with a direct **Gemini API Key** (Google AI Studio). Redirection does **NOT** work in OAuth/free-tier user login mode, as those library calls are bound to specific Google services endpoints.
+
+---
 
 ## Compatibility Matrix
 
-| Client | Compatibility | Notes |
-|--------|---------------|-------|
-| OpenAI SDKs | ✅ Excellent | Fully compatible |
-| LangChain / LlamaIndex | ✅ Excellent | Point custom base URL to proxy |
-| Custom HTTP Clients | ✅ Excellent | Standard API interface |
-| VS Code Copilot Extension | ⚠️ Unreliable | Hijacking VS Code's internal extension is not recommended and highly unreliable. |
+| Client Tool | Support Status | Redirection Mode | Notes |
+|-------------|----------------|------------------|-------|
+| **Claude Code** | ✅ Supported | `ANTHROPIC_BASE_URL` | Requires API-key developer billing, not web Pro/Max subscriptions |
+| **OpenCode** | ✅ Supported | `settings.json` | Fully compatible |
+| **Google Gemini CLI** | ✅ Supported | `GEMINI_BASE_URL` | Requires Gemini API Key, OAuth logins bypass |
+| **Cline** | ✅ Supported | UI settings (OpenAI) | Works seamlessly |
+| **Aider** | ✅ Supported | `OPENAI_API_BASE` | Fully compatible |
+| **VS Code Copilot** | ❌ Unsupported | N/A | Hijacking VS Code's internal extension is not recommended |
+
+---
 
 ## Monitoring
 
-Relay exposes Prometheus metrics at the `/metrics` endpoint. This allows you to monitor cache hit rates, proxy latency, and request volume.
+Relay exposes Prometheus metrics at `/metrics`. This allows you to monitor cache hit rates, proxy latency, and credit usage:
+- `relay_requests_total`: Request count.
+- `relay_credits_saved_by_cache_total`: Saved credits.
+- `relay_credits_consumed_by_model_total`: Consumed credits.
+
+---
 
 ## Troubleshooting
 
 | Issue | Resolution |
 |-------|------------|
-| Connection Refused | Ensure Relay is running and `server.port` matches your client config. |
+| Connection Refused | Ensure Relay is running and port `8080` (or `server.port`) is free. |
 | Cache Misses | Verify that temperature > 0 is not bypassing the cache (see `cacheBypass` config). |
 | High Latency | Check upstream API latency and ensure circuit breakers are not tripping. |
+

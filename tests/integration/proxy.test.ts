@@ -103,11 +103,32 @@ describe('Relay Proxy Integration Tests', () => {
       };
 
       try {
-        const chatReq = compatibilityLayer.parseOpenAIChatRequest(req.request.body);
+        let pathname = '';
+        try {
+          const parsedUrl = new URL(pathUrl, 'http://localhost');
+          pathname = parsedUrl.pathname;
+        } catch (e) {
+          pathname = pathUrl;
+        }
+        const geminiMatch = pathname.match(/^\/v1(beta)?\/models\/([^/:]+):(streamG|g)enerateContent$/);
+        const isGemini = Boolean(geminiMatch);
+
+        let chatReq: InternalChatRequest;
+        if (isGemini) {
+          const model = geminiMatch![2];
+          const isStream = geminiMatch![3] === 'streamG';
+          chatReq = compatibilityLayer.parseGeminiRequest(req.request.body, model, isStream);
+        } else {
+          chatReq = compatibilityLayer.parseOpenAIChatRequest(req.request.body);
+        }
+
         const normalized = requestProcessor.normalizeRequest(chatReq);
         const { contextHash } = requestProcessor.generateContextHash(normalized);
         
         const formatResponse = (internalRes: InternalChatResponse): unknown => {
+          if (isGemini) {
+            return compatibilityLayer.formatGeminiResponse(internalRes);
+          }
           return compatibilityLayer.formatOpenAIResponse(internalRes);
         };
 
@@ -173,16 +194,17 @@ describe('Relay Proxy Integration Tests', () => {
     await new Promise<void>((resolve) => mockServer.close(() => resolve()));
   });
 
-  const sendPost = (data: any): Promise<{ statusCode: number; headers: any; body: any }> => {
+  const sendPostPath = (path: string, data: any, customHeaders: Record<string, string> = {}): Promise<{ statusCode: number; headers: any; body: any }> => {
     return new Promise((resolve, reject) => {
       const req = http.request({
         hostname: '127.0.0.1',
         port: PROXY_PORT,
-        path: '/v1/chat/completions',
+        path,
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer test-key'
+          'Authorization': 'Bearer test-key',
+          ...customHeaders
         }
       }, (res) => {
         let body = '';
@@ -191,7 +213,7 @@ describe('Relay Proxy Integration Tests', () => {
           resolve({
             statusCode: res.statusCode || 0,
             headers: res.headers,
-            body: JSON.parse(body)
+            body: body ? JSON.parse(body) : null
           });
         });
       });
@@ -199,6 +221,10 @@ describe('Relay Proxy Integration Tests', () => {
       req.write(JSON.stringify(data));
       req.end();
     });
+  };
+
+  const sendPost = (data: any): Promise<{ statusCode: number; headers: any; body: any }> => {
+    return sendPostPath('/v1/chat/completions', data);
   };
 
   it('1. Exact Caching: serves identical requests from cache', async () => {
@@ -285,5 +311,24 @@ describe('Relay Proxy Integration Tests', () => {
     expect(mockRequestCount).toBe(1); // Upstream received exactly 1 request
 
     mockResponseDelay = 0;
+  });
+
+  it('5. Gemini Support: routes and translates Gemini format', async () => {
+    mockRequestCount = 0;
+    const geminiReq = {
+      contents: [{ role: 'user', parts: [{ text: 'Explain gravity' }] }]
+    };
+
+    // First request - MISS
+    const res1 = await sendPostPath('/v1/models/gemini-2.0-flash:generateContent?key=test-key', geminiReq);
+    expect(res1.statusCode).toBe(200);
+    expect(res1.headers['x-cache']).toBe('MISS');
+    expect(res1.body.candidates[0].content.parts[0].text).toBe('Mock response');
+
+    // Second request - HIT
+    const res2 = await sendPostPath('/v1/models/gemini-2.0-flash:generateContent?key=test-key', geminiReq);
+    expect(res2.statusCode).toBe(200);
+    expect(res2.headers['x-cache']).toBe('HIT');
+    expect(res2.body.candidates[0].content.parts[0].text).toBe('Mock response');
   });
 });

@@ -253,11 +253,21 @@ export class APIGatewayImpl implements APIGateway {
         }
 
         // Only handle specific LLM endpoints
-        if (req.method !== 'POST' || (
-          req.url !== CHAT_COMPLETIONS_PATH && 
-          req.url !== COMPLETIONS_PATH && 
-          req.url !== ANTHROPIC_MESSAGES_PATH
-        )) {
+        let pathname = '';
+        try {
+          const parsedUrl = new URL(req.url || '', 'http://localhost');
+          pathname = parsedUrl.pathname;
+        } catch (e) {
+          pathname = req.url || '';
+        }
+
+        const isStandardPath = pathname === CHAT_COMPLETIONS_PATH || 
+                               pathname === COMPLETIONS_PATH || 
+                               pathname === ANTHROPIC_MESSAGES_PATH;
+
+        const isGeminiPath = /^\/v1(beta)?\/models\/([^/:]+):(streamG|g)enerateContent$/.test(pathname);
+
+        if (req.method !== 'POST' || (!isStandardPath && !isGeminiPath)) {
           clearTimeout(timeoutId);
           await this.sendResponse(res, {
             statusCode: 404,
@@ -377,8 +387,17 @@ export class APIGatewayImpl implements APIGateway {
    */
   async handleCompletionRequest(req: HTTPRequest): Promise<HTTPResponse> {
     try {
-      // Extract API key from Authorization header
-      const apiKey = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
+      // Extract API key from Authorization header, x-goog-api-key, or query param
+      let apiKey = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
+      if (!apiKey) {
+        apiKey = req.headers.get('x-goog-api-key') || '';
+      }
+      if (!apiKey && req.url) {
+        try {
+          const parsedUrl = new URL(req.url, 'http://localhost');
+          apiKey = parsedUrl.searchParams.get('key') || '';
+        } catch (e) {}
+      }
       
       if (!apiKey) {
         return {
