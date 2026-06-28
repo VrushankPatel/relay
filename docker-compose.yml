@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  relay:
+    build: .
+    # For published GHCR image, comment out "build: ." and uncomment below:
+    # image: ghcr.io/VrushankPatel/relay:latest
+    container_name: relay
+    ports:
+      - "${RELAY_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      # Ensure Copilot device flow logs appear in docker-compose logs
+      - LOG_LEVEL=INFO
+    volumes:
+      # Persists GitHub Copilot OAuth device-flow token
+      - relay_tokens:/home/node/.relay
+      # Optional: To use a custom YAML config file, uncomment the line below:
+      # - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  relay_tokens:
+    name: relay_tokens

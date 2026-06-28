@@ -79,23 +79,22 @@ export class ConfigurationManager implements IConfigurationManager {
     this.configPath = path;
 
     try {
-      let yamlContent: string;
+      let parsed: Record<string, any> = {};
       if (fs.existsSync(path)) {
-        yamlContent = fs.readFileSync(path, 'utf8');
+        const yamlContent = fs.readFileSync(path, 'utf8');
+        const jsYaml = await import('js-yaml');
+        parsed = jsYaml.load(yamlContent) as Record<string, any> || {};
       } else {
-        this.logger.warn({ path }, 'Config file not found, using defaults');
-        return this.currentConfig;
+        if (!process.env.RELAY_PROVIDER) {
+          this.logger.warn({ path }, 'Config file not found and RELAY_PROVIDER not set, using defaults');
+        } else {
+          this.logger.info('Config file not found, initializing from environment variables');
+        }
       }
 
-      const jsYaml = await import('js-yaml');
-      const parsed = jsYaml.load(yamlContent) as Record<string, any>;
-
-      if (!parsed || typeof parsed !== 'object') {
-        this.logger.warn({ path }, 'Config file is empty or invalid, using defaults');
-        return this.currentConfig;
-      }
-
-      const config = this.mergeConfig(parsed);
+      let config = this.mergeConfig(parsed);
+      config = this.applyEnvironmentOverrides(config);
+      
       const errors = this.validateConfig(config);
 
       if (errors.length > 0) {
@@ -151,7 +150,9 @@ export class ConfigurationManager implements IConfigurationManager {
       if (!parsed || typeof parsed !== 'object') {
         return this.currentConfig;
       }
-      return this.mergeConfig(parsed);
+      let config = this.mergeConfig(parsed);
+      config = this.applyEnvironmentOverrides(config);
+      return config;
     } catch (error) {
       this.logger.error({ error }, 'Error reloading config');
       return this.currentConfig;
@@ -201,7 +202,7 @@ export class ConfigurationManager implements IConfigurationManager {
   }
 
   private mergeConfig(parsed: Record<string, any>): Configuration {
-    const config = { ...DEFAULT_CONFIG };
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as Configuration;
 
     if (parsed.server) {
       config.server = { ...config.server, ...parsed.server };
@@ -236,7 +237,37 @@ export class ConfigurationManager implements IConfigurationManager {
     if (parsed.cacheBypass) {
       config.cacheBypass = { ...config.cacheBypass, ...parsed.cacheBypass };
     }
+    if (parsed.provider) {
+      config.provider = parsed.provider;
+    }
 
+    return config;
+  }
+
+  private applyEnvironmentOverrides(config: Configuration): Configuration {
+    if (process.env.RELAY_PORT) {
+      config.server.port = parseInt(process.env.RELAY_PORT, 10);
+    }
+    if (process.env.RELAY_HOST) {
+      config.server.host = process.env.RELAY_HOST;
+    }
+    
+    if (process.env.RELAY_PROVIDER) {
+      const pType = process.env.RELAY_PROVIDER.toLowerCase();
+      config.provider = { type: pType };
+      
+      if (pType === 'openai') {
+        if (process.env.OPENAI_API_KEY) config.provider.apiKey = process.env.OPENAI_API_KEY;
+      } else if (pType === 'anthropic') {
+        if (process.env.ANTHROPIC_API_KEY) config.provider.apiKey = process.env.ANTHROPIC_API_KEY;
+      } else if (pType === 'generic') {
+        if (process.env.GENERIC_API_KEY) config.provider.apiKey = process.env.GENERIC_API_KEY;
+        if (process.env.GENERIC_BASE_URL) config.provider.baseUrl = process.env.GENERIC_BASE_URL;
+      } else if (pType === 'copilot') {
+        config.provider.requireConsent = process.env.COPILOT_REQUIRE_CONSENT !== 'false';
+      }
+    }
+    
     return config;
   }
 }

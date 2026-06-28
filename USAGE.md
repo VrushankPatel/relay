@@ -9,9 +9,24 @@ npm run build
 
 ## Provider Configuration
 
-You can configure your chosen upstream LLM provider in your `config.yaml`.
+You can configure your chosen upstream LLM provider either in your `config.yaml` or entirely via environment variables (recommended for Docker).
 
-### OpenAI (Primary, Recommended)
+### Environment Variables
+
+When running without a config file (or to override it), the following environment variables are supported:
+
+- `RELAY_PROVIDER`: The active provider (`openai`, `anthropic`, `copilot`, `generic`).
+- `RELAY_PORT`: The port Relay will listen on (default: `8080`).
+- `RELAY_HOST`: The interface to bind to (default: `0.0.0.0`).
+- `OPENAI_API_KEY`: API key for OpenAI provider.
+- `ANTHROPIC_API_KEY`: API key for Anthropic provider.
+- `GENERIC_API_KEY`: Optional API key for a generic backend.
+- `GENERIC_BASE_URL`: Base URL for a generic backend (e.g. Ollama).
+- `COPILOT_REQUIRE_CONSENT`: Must be set to `false` when using the Copilot provider programmatically.
+
+### YAML Configuration
+
+#### OpenAI (Primary, Recommended)
 
 ```yaml
 provider:

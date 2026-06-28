@@ -23,7 +23,26 @@ A transparent caching and deduplication proxy that sits between your application
 - **Circuit Breaker**: Prevent cascading failures and overload on upstream APIs.
 - **Prometheus Metrics**: Monitor usage, cache hit rates, and latency.
 
-## Quick Start
+## Run with Docker
+
+The fastest way to get started is with Docker Compose.
+
+1. Download the sample environment file and rename it to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Edit `.env` to include your provider's API key (e.g., `OPENAI_API_KEY`).
+3. Start the proxy:
+   ```bash
+   docker compose up -d
+   ```
+The proxy will be available at `http://localhost:8080`.
+
+**Note:** The current Docker image includes all `v4` features, including robust encrypted cache persistence (AES-256-GCM) and streaming chunk multicast deduplication. The final image size is extremely lightweight (`~73MB` content size) and is based on `node:20-alpine`.
+
+## Installation (Node)
+
+If you prefer running natively without Docker:
 
 1. Install and build Relay:
    ```bash

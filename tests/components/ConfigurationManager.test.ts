@@ -26,6 +26,26 @@ describe('ConfigurationManager', () => {
 
   beforeEach(() => {
     configManager = new ConfigurationManager();
+    // Clean up relevant env vars
+    delete process.env.RELAY_PROVIDER;
+    delete process.env.RELAY_PORT;
+    delete process.env.RELAY_HOST;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GENERIC_API_KEY;
+    delete process.env.GENERIC_BASE_URL;
+    delete process.env.COPILOT_REQUIRE_CONSENT;
+  });
+
+  afterEach(() => {
+    delete process.env.RELAY_PROVIDER;
+    delete process.env.RELAY_PORT;
+    delete process.env.RELAY_HOST;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GENERIC_API_KEY;
+    delete process.env.GENERIC_BASE_URL;
+    delete process.env.COPILOT_REQUIRE_CONSENT;
   });
 
   describe('loadConfig', () => {
@@ -94,6 +114,30 @@ server:
       expect(config.server.host).toBe('0.0.0.0');
       expect(config.cache.ttlHours).toBe(24);
       removeFile(file);
+    });
+
+    it('should initialize strictly from environment variables', async () => {
+      process.env.RELAY_PROVIDER = 'anthropic';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+      process.env.RELAY_PORT = '4000';
+      process.env.RELAY_HOST = '1.1.1.1';
+
+      const config = await configManager.loadConfig('/nonexistent/path/config.yaml');
+      expect(config.server.port).toBe(4000);
+      expect(config.server.host).toBe('1.1.1.1');
+      expect(config.provider?.type).toBe('anthropic');
+      expect(config.provider?.apiKey).toBe('sk-ant-test');
+    });
+
+    it('should initialize strictly from environment variables for generic', async () => {
+      process.env.RELAY_PROVIDER = 'generic';
+      process.env.GENERIC_API_KEY = 'sk-gen-test';
+      process.env.GENERIC_BASE_URL = 'http://localhost:11434';
+
+      const config = await configManager.loadConfig('/nonexistent/path/config.yaml');
+      expect(config.provider?.type).toBe('generic');
+      expect(config.provider?.apiKey).toBe('sk-gen-test');
+      expect(config.provider?.baseUrl).toBe('http://localhost:11434');
     });
   });
 
