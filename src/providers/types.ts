@@ -64,6 +64,12 @@ export interface IProvider {
    */
   parseResponse(raw: unknown): InternalChatResponse;
 
+  /**
+   * Assemble a full internal response from a provider's stream chunks.
+   * Useful for caching a streamed response after completion.
+   */
+  assembleStream?(chunks: string[]): InternalChatResponse;
+
   /** Liveness probe */
   checkHealth(): Promise<boolean>;
 

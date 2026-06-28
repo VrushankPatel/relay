@@ -1,9 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { CacheManager } from '../../src/components/CacheManager.js';
 import { ChatCacheEntry, InternalChatResponse, NormalizedChatRequest } from '../../src/types/chat.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
 
 describe('CacheManager', () => {
   let cacheManager: CacheManager;
+  let tempDir: string;
 
   const mockResponse: InternalChatResponse = {
     id: 'test-1',
@@ -24,9 +28,15 @@ describe('CacheManager', () => {
     outputTokens: 10
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'relay-cache-test-'));
     // maxEntries=10000, ttl=24
-    cacheManager = new CacheManager(10000, 24);
+    cacheManager = new CacheManager(10000, 24, tempDir, true);
+    await cacheManager.initialize();
+  });
+
+  afterEach(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   describe('shouldBypassCache', () => {
@@ -83,6 +93,14 @@ describe('CacheManager', () => {
       expect(found).not.toBeNull();
       expect(found?.contextHash).toBe('hash1');
       expect(found?.accessCount).toBe(1);
+
+      // Verify file was written
+      const files = await fs.readdir(tempDir);
+      expect(files).toContain('hash1.json');
+      
+      // Verify content is encrypted (should not contain plaintext 'test response')
+      const content = await fs.readFile(path.join(tempDir, 'hash1.json'), 'utf-8');
+      expect(content).not.toContain('test response');
     });
 
     it('should return null for non-existent exact match', async () => {
@@ -91,7 +109,8 @@ describe('CacheManager', () => {
     });
 
     it('should return null for expired exact match', async () => {
-      const shortTTLCache = new CacheManager(10000, 1 / (60 * 60 * 1000)); // 1ms TTL
+      const shortTTLCache = new CacheManager(10000, 1 / (60 * 60 * 1000), tempDir, true); // 1ms TTL
+      await shortTTLCache.initialize();
       const entry = createMockEntry('hash1');
       await shortTTLCache.store('hash1', entry);
       
@@ -120,7 +139,8 @@ describe('CacheManager', () => {
 
   describe('eviction', () => {
     it('should evict least recently used entries when reaching capacity', async () => {
-      const smallCache = new CacheManager(2); // max 2 entries
+      const smallCache = new CacheManager(2, 24, tempDir, true); // max 2 entries
+      await smallCache.initialize();
       
       await smallCache.store('hash1', createMockEntry('hash1'));
       await smallCache.storePrefix('prefix1', createMockEntry('prefix1'));

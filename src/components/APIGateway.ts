@@ -22,7 +22,7 @@ const RETRY_AFTER_SECONDS = 5;
 export interface HTTPResponse {
   statusCode: number;
   headers: Record<string, string>;
-  body: string;
+  body: string | AsyncIterable<string>;
 }
 
 /**
@@ -191,7 +191,7 @@ export class APIGatewayImpl implements APIGateway {
   ): Promise<void> {
     // Check concurrent request limit
     if (this.activeConnections >= this.maxConcurrentRequests) {
-      this.sendResponse(res, {
+      await this.sendResponse(res, {
         statusCode: 503,
         headers: { 'Content-Type': 'application/json', 'Retry-After': String(RETRY_AFTER_SECONDS) },
         body: JSON.stringify({
@@ -214,13 +214,13 @@ export class APIGatewayImpl implements APIGateway {
           requestTimedOut = true;
           this.sendResponse(res, {
             statusCode: 503,
-        headers: { 'Content-Type': 'application/json', 'Retry-After': String(RETRY_AFTER_SECONDS) },
+            headers: { 'Content-Type': 'application/json', 'Retry-After': String(RETRY_AFTER_SECONDS) },
             body: JSON.stringify({
               error: 'Request timeout',
               code: 'REQUEST_TIMEOUT',
               retryAfter: 5
             })
-          });
+          }).catch(() => {});
         }
       }, this.requestTimeoutMs);
 
@@ -229,7 +229,7 @@ export class APIGatewayImpl implements APIGateway {
         if (req.method && req.url) {
           if (req.method === 'GET' && req.url === '/v1/models') {
             clearTimeout(timeoutId);
-            this.sendResponse(res, {
+            await this.sendResponse(res, {
               statusCode: 200,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -259,7 +259,7 @@ export class APIGatewayImpl implements APIGateway {
           req.url !== ANTHROPIC_MESSAGES_PATH
         )) {
           clearTimeout(timeoutId);
-          this.sendResponse(res, {
+          await this.sendResponse(res, {
             statusCode: 404,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -288,7 +288,7 @@ export class APIGatewayImpl implements APIGateway {
 
         // Guard against double-response if the timeout already fired
         if (!requestTimedOut) {
-          this.sendResponse(res, response);
+          await this.sendResponse(res, response);
         }
 
         const duration = Date.now() - requestStartTime;
@@ -297,7 +297,7 @@ export class APIGatewayImpl implements APIGateway {
         clearTimeout(timeoutId);
         if (error instanceof ValidationError) {
           if (!requestTimedOut) {
-            this.sendResponse(res, {
+            await this.sendResponse(res, {
               statusCode: 400,
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -360,9 +360,16 @@ export class APIGatewayImpl implements APIGateway {
   /**
    * Send HTTP response to the client.
    */
-  private sendResponse(res: http.ServerResponse, response: HTTPResponse): void {
+  private async sendResponse(res: http.ServerResponse, response: HTTPResponse): Promise<void> {
     res.writeHead(response.statusCode, response.headers);
-    res.end(response.body);
+    if (typeof response.body === 'string') {
+      res.end(response.body);
+    } else {
+      for await (const chunk of response.body) {
+        res.write(chunk);
+      }
+      res.end();
+    }
   }
 
   /**

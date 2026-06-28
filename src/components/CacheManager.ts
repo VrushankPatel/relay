@@ -1,5 +1,9 @@
 import { CacheStatistics } from '../types/cache.js';
 import { ChatCacheEntry, NormalizedChatRequest } from '../types/chat.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import { encryptString, decryptString } from '../utils/encryption.js';
 
 export interface ICacheManager {
   lookupExact(hash: string): Promise<ChatCacheEntry | null>;
@@ -33,15 +37,76 @@ export class CacheManager implements ICacheManager {
   private totalHits = 0;
   private totalMisses = 0;
 
+  private cacheDirectory: string;
+  private encryptCache: boolean;
+  private cacheSecret: string;
+
   constructor(
     maxEntries = 10000,
-    ttlHours = 24
+    ttlHours = 24,
+    cacheDirectory = path.join(os.homedir(), '.relay', 'cache'),
+    encryptCache = true
   ) {
     this.cache = new Map();
     this.prefixCacheMap = new Map();
     this.lruMap = new Map();
     this.maxEntries = maxEntries;
     this.ttlMilliseconds = ttlHours * 60 * 60 * 1000;
+    this.cacheDirectory = cacheDirectory;
+    this.encryptCache = encryptCache;
+    this.cacheSecret = process.env.RELAY_CACHE_SECRET || 'default-relay-cache-secret';
+  }
+
+  async initialize(): Promise<void> {
+    try {
+      await fs.mkdir(this.cacheDirectory, { recursive: true });
+    } catch (err) {
+      // Ignore if exists
+    }
+  }
+
+  private getFilePath(hash: string, isPrefix: boolean): string {
+    return path.join(this.cacheDirectory, `${isPrefix ? 'prefix_' : ''}${hash}.json`);
+  }
+
+  private async loadFromDisk(hash: string, isPrefix: boolean): Promise<ChatCacheEntry | null> {
+    const filePath = this.getFilePath(hash, isPrefix);
+    try {
+      const data = await fs.readFile(filePath, 'utf-8');
+      if (this.encryptCache) {
+        const envelope = JSON.parse(data);
+        const decrypted = decryptString(envelope, this.cacheSecret);
+        return JSON.parse(decrypted);
+      } else {
+        return JSON.parse(data);
+      }
+    } catch (e) {
+      return null; // File doesn't exist or is corrupted
+    }
+  }
+
+  private async saveToDisk(hash: string, entry: ChatCacheEntry, isPrefix: boolean): Promise<void> {
+    const filePath = this.getFilePath(hash, isPrefix);
+    try {
+      const serialized = JSON.stringify(entry);
+      if (this.encryptCache) {
+        const envelope = encryptString(serialized, this.cacheSecret);
+        await fs.writeFile(filePath, JSON.stringify(envelope), 'utf-8');
+      } else {
+        await fs.writeFile(filePath, serialized, 'utf-8');
+      }
+    } catch (e) {
+      // Ignore write errors (e.g. disk full)
+    }
+  }
+
+  private async deleteFromDisk(hash: string, isPrefix: boolean): Promise<void> {
+    const filePath = this.getFilePath(hash, isPrefix);
+    try {
+      await fs.unlink(filePath);
+    } catch (e) {
+      // Ignore if file doesn't exist
+    }
   }
 
   shouldBypassCache(req: NormalizedChatRequest): boolean {
@@ -55,7 +120,15 @@ export class CacheManager implements ICacheManager {
   }
 
   async lookupExact(hash: string): Promise<ChatCacheEntry | null> {
-    const entry = this.cache.get(hash);
+    let entry = this.cache.get(hash);
+    if (!entry) {
+      entry = (await this.loadFromDisk(hash, false)) || undefined;
+      if (entry) {
+        this.cache.set(hash, entry);
+        this.addToFront(`exact:${hash}`, false);
+      }
+    }
+
     if (!entry) {
       this.totalMisses++;
       return null;
@@ -64,6 +137,7 @@ export class CacheManager implements ICacheManager {
     if (this.isExpired(entry)) {
       this.cache.delete(hash);
       this.removeFromLRU(`exact:${hash}`);
+      this.deleteFromDisk(hash, false).catch(() => {});
       this.totalMisses++;
       return null;
     }
@@ -77,7 +151,15 @@ export class CacheManager implements ICacheManager {
   }
 
   async lookupPrefix(prefixHash: string): Promise<ChatCacheEntry | null> {
-    const entry = this.prefixCacheMap.get(prefixHash);
+    let entry = this.prefixCacheMap.get(prefixHash);
+    if (!entry) {
+      entry = (await this.loadFromDisk(prefixHash, true)) || undefined;
+      if (entry) {
+        this.prefixCacheMap.set(prefixHash, entry);
+        this.addToFront(`prefix:${prefixHash}`, true);
+      }
+    }
+
     if (!entry) {
       this.totalMisses++;
       return null;
@@ -86,6 +168,7 @@ export class CacheManager implements ICacheManager {
     if (this.isExpired(entry)) {
       this.prefixCacheMap.delete(prefixHash);
       this.removeFromLRU(`prefix:${prefixHash}`);
+      this.deleteFromDisk(prefixHash, true).catch(() => {});
       this.totalMisses++;
       return null;
     }
@@ -108,6 +191,7 @@ export class CacheManager implements ICacheManager {
 
     this.cache.set(hash, entry);
     this.addToFront(`exact:${hash}`, false);
+    await this.saveToDisk(hash, entry, false);
   }
 
   async storePrefix(prefixHash: string, entry: ChatCacheEntry): Promise<void> {
@@ -118,6 +202,7 @@ export class CacheManager implements ICacheManager {
 
     this.prefixCacheMap.set(prefixHash, entry);
     this.addToFront(`prefix:${prefixHash}`, true);
+    await this.saveToDisk(prefixHash, entry, true);
   }
 
   isExpired(entry: ChatCacheEntry): boolean {
@@ -135,8 +220,10 @@ export class CacheManager implements ICacheManager {
 
       if (isPrefix) {
         this.prefixCacheMap.delete(actualKey);
+        this.deleteFromDisk(actualKey, true).catch(() => {});
       } else {
         this.cache.delete(actualKey);
+        this.deleteFromDisk(actualKey, false).catch(() => {});
       }
       
       this.removeFromLRU(lruKey);
@@ -147,6 +234,15 @@ export class CacheManager implements ICacheManager {
 
   async invalidate(): Promise<number> {
     const count = this.cache.size + this.prefixCacheMap.size;
+    
+    // Clear disk
+    for (const hash of this.cache.keys()) {
+      await this.deleteFromDisk(hash, false);
+    }
+    for (const hash of this.prefixCacheMap.keys()) {
+      await this.deleteFromDisk(hash, true);
+    }
+    
     this.cache.clear();
     this.prefixCacheMap.clear();
     this.lruMap.clear();

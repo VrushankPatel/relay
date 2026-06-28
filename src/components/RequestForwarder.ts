@@ -16,6 +16,7 @@ type CircuitState = 'closed' | 'open' | 'half-open';
 
 export interface IRequestForwarder {
   forward(req: InternalChatRequest, provider: IProvider): Promise<InternalChatResponse>;
+  forwardStream(req: InternalChatRequest, provider: IProvider): AsyncIterable<string>;
   checkHealth(): Promise<boolean>;
   getPoolStats(): PoolStatistics;
   destroy(): void;
@@ -121,6 +122,121 @@ export class RequestForwarder implements IRequestForwarder {
     }
 
     throw lastError || new Error('Request failed');
+  }
+
+  async *forwardStream(req: InternalChatRequest, provider: IProvider): AsyncIterable<string> {
+    this.checkCircuitBreaker();
+
+    if (this.circuitState === 'open') {
+      throw new Error('Circuit breaker is open - API temporarily unavailable');
+    }
+
+    let lastError: Error | null = null;
+    let did401Retry = false;
+    const body = provider.transformRequestBody(req);
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      let upstreamReq: http.ClientRequest | undefined;
+      
+      try {
+        if (attempt > 0) {
+          const delay = BASE_RETRY_MS * Math.pow(2, attempt - 1);
+          this.logger.debug({ attempt, delay }, 'Retrying stream request');
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+
+        const headers = await provider.getHeaders();
+        const endpointUrl = provider.getEndpointUrl();
+        const url = new URL(endpointUrl);
+        const isHttps = url.protocol === 'https:';
+        const transport = isHttps ? https : http;
+
+        const responsePromise = new Promise<http.IncomingMessage>((resolve, reject) => {
+          let timeoutId = setTimeout(() => {
+            if (upstreamReq) upstreamReq.destroy(new Error('Request timeout'));
+            reject(new Error('API request timed out'));
+          }, REQUEST_TIMEOUT_MS);
+
+          upstreamReq = transport.request({
+            hostname: url.hostname,
+            port: url.port ? parseInt(url.port) : (isHttps ? 443 : 80),
+            path: url.pathname + url.search,
+            method: 'POST',
+            headers,
+            agent: isHttps ? this.httpsAgent : this.httpAgent,
+          }, (res) => {
+            clearTimeout(timeoutId);
+            resolve(res);
+          });
+          
+          upstreamReq.on('error', (err) => {
+            clearTimeout(timeoutId);
+            reject(err);
+          });
+
+          upstreamReq.write(JSON.stringify(body));
+          upstreamReq.end();
+        });
+
+        const upstreamRes = await responsePromise;
+
+        if (upstreamRes.statusCode && upstreamRes.statusCode >= 400) {
+          let errorData = '';
+          for await (const chunk of upstreamRes) {
+            errorData += chunk.toString();
+          }
+          const err: any = new Error(`HTTP ${upstreamRes.statusCode}: ${errorData}`);
+          err.statusCode = upstreamRes.statusCode;
+          throw err;
+        }
+
+        this.totalRequests++;
+        this.successfulRequests++;
+        this.failureCount = 0;
+
+        if (this.circuitState === 'half-open') {
+          this.circuitState = 'closed';
+          this.logger.info('Circuit breaker closed - API recovered');
+        }
+
+        for await (const chunk of upstreamRes) {
+          yield chunk.toString();
+        }
+        return;
+
+      } catch (error: any) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.totalRequests++;
+
+        if (error.statusCode === 401 && !did401Retry) {
+          this.logger.warn('Received 401 Unauthorized, refreshing credentials and retrying once');
+          await provider.refreshCredentials();
+          did401Retry = true;
+          attempt--;
+          continue;
+        }
+
+        const isTransient = this.isTransientError(lastError) || (error.statusCode && error.statusCode >= 500);
+        if (!isTransient || attempt === MAX_RETRIES) {
+          break;
+        }
+
+        this.logger.debug({ attempt, error: lastError.message }, 'Transient error in stream, will retry');
+      }
+    }
+
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+
+    if (this.failureCount >= CIRCUIT_BREAKER_THRESHOLD) {
+      this.circuitState = 'open';
+      this.logger.error(
+        { failureCount: this.failureCount },
+        'Circuit breaker opened - too many consecutive failures in stream',
+      );
+    }
+
+    throw lastError || new Error('Stream request failed');
   }
 
   async checkHealth(): Promise<boolean> {

@@ -86,8 +86,11 @@ async function main(): Promise<void> {
     const compatibilityLayer = new CompatibilityLayer();
     const cacheManager = new CacheManager(
       config.cache.maxEntries,
-      config.cache.ttlHours
+      config.cache.ttlHours,
+      undefined,
+      config.security?.encryptCache
     );
+    await cacheManager.initialize();
     const fuzzyGuard = new FuzzyGuard({
       enabled: config.fuzzyCache?.enabled || false,
       maxTokenEditDistance: config.fuzzyCache?.maxTokenEditDistance || 3,
@@ -150,12 +153,12 @@ async function main(): Promise<void> {
       const startTime = Date.now();
       const pathUrl = req.request.url || '/v1/chat/completions';
       
-      const sendResponse = (status: number, data: unknown, cached: boolean): HTTPResponse => {
+      const sendResponse = (status: number, data: unknown, cached: boolean, isStream = false): HTTPResponse => {
         metricsCollector.recordRequest(status, cached, Date.now() - startTime, 'unknown');
         return {
           statusCode: status,
-          headers: { 'Content-Type': 'application/json', ...(cached ? { 'X-Cache': 'HIT' } : { 'X-Cache': 'MISS' }) },
-          body: typeof data === 'string' ? data : JSON.stringify(data),
+          headers: { 'Content-Type': isStream ? 'text/event-stream' : 'application/json', ...(cached ? { 'X-Cache': 'HIT' } : { 'X-Cache': 'MISS' }) },
+          body: (isStream || typeof data === 'string') ? data as string | AsyncIterable<string> : JSON.stringify(data),
         };
       };
 
@@ -187,7 +190,15 @@ async function main(): Promise<void> {
           const exactMatch = await cacheManager.lookupExact(contextHash);
           if (exactMatch) {
             log.info('Cache hit (exact)');
-            return sendResponse(200, formatResponse(exactMatch.response), true);
+            // If requested stream but cache is complete object, we could theoretically synthesize SSE.
+            // For now, we return it. (If they want real stream synthesis from cache, we'd do it here).
+            // But returning the JSON is often acceptable if the IDE handles both. Let's assume JSON is fine or we synthesize:
+            if (chatReq.stream && pathUrl !== '/v1/messages') {
+              // Synthesize OpenAI stream
+              const streamData = `data: ${JSON.stringify(formatResponse(exactMatch.response))}\n\ndata: [DONE]\n\n`;
+              return sendResponse(200, streamData, true, true);
+            }
+            return sendResponse(200, formatResponse(exactMatch.response), true, false);
           }
         } catch (e) {
           log.warn({ error: e }, 'Cache exact lookup failed');
@@ -198,7 +209,11 @@ async function main(): Promise<void> {
             const similarMatch = fuzzyGuard.lookup(normalized, contextHash);
             if (similarMatch) {
               log.info('Cache hit (fuzzy)');
-              return sendResponse(200, formatResponse(similarMatch.response), true);
+              if (chatReq.stream && pathUrl !== '/v1/messages') {
+                const streamData = `data: ${JSON.stringify(formatResponse(similarMatch.response))}\n\ndata: [DONE]\n\n`;
+                return sendResponse(200, streamData, true, true);
+              }
+              return sendResponse(200, formatResponse(similarMatch.response), true, false);
             }
           } catch (e) {
             log.warn({ error: e }, 'Cache fuzzy lookup failed');
@@ -208,15 +223,59 @@ async function main(): Promise<void> {
         // C. Deduplication
         if (dedupManager.isDuplicate(contextHash)) {
           log.info('Deduplicated request');
-          const dedupResponse = await dedupManager.waitForCompletion(contextHash);
-          return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true);
+          if (chatReq.stream) {
+            return sendResponse(200, dedupManager.waitForStream(contextHash), true, true);
+          } else {
+            const dedupResponse = await dedupManager.waitForCompletion(contextHash);
+            return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true, false);
+          }
         }
 
-        await dedupManager.registerRequest(contextHash);
+        await dedupManager.registerRequest(contextHash, chatReq.stream);
 
         // D. Forward
         try {
-          const internalResponse = await requestForwarder.forward(chatReq, provider);
+          if (chatReq.stream) {
+            const generator = async function* () {
+              const chunks: string[] = [];
+              try {
+                const stream = requestForwarder.forwardStream(chatReq, provider);
+                for await (const chunk of stream) {
+                  chunks.push(chunk);
+                  dedupManager.addStreamChunk(contextHash, chunk);
+                  yield chunk;
+                }
+                dedupManager.completeStream(contextHash);
+
+                if (provider.assembleStream) {
+                  try {
+                    const internalResponse = provider.assembleStream(chunks);
+                    const entry = {
+                      contextHash,
+                      response: internalResponse,
+                      timestamp: Date.now(),
+                      accessCount: 1,
+                      lastAccessTime: Date.now(),
+                      model: internalResponse.model,
+                      inputTokens: internalResponse.usage?.prompt_tokens || 0,
+                      outputTokens: internalResponse.usage?.completion_tokens || 0,
+                    };
+                    await cacheManager.store(contextHash, entry);
+                    if (config.fuzzyCache?.enabled) {
+                      fuzzyGuard.store(normalized, contextHash, entry);
+                    }
+                  } catch (e) {
+                    log.warn({ error: e }, 'Cache stream assembly/store failed');
+                  }
+                }
+              } catch (forwardError: any) {
+                dedupManager.failRequest(contextHash, forwardError);
+                throw forwardError;
+              }
+            };
+            return sendResponse(200, generator(), false, true);
+          } else {
+            const internalResponse = await requestForwarder.forward(chatReq, provider);
 
           // E. Cache Store
           try {
@@ -240,8 +299,8 @@ async function main(): Promise<void> {
 
           dedupManager.completeRequest(contextHash, internalResponse as any);
           log.info('Cache miss - forwarded to provider');
-          return sendResponse(200, formatResponse(internalResponse), false);
-
+          return sendResponse(200, formatResponse(internalResponse), false, false);
+          }
         } catch (forwardError) {
           dedupManager.failRequest(contextHash, forwardError instanceof Error ? forwardError : new Error(String(forwardError)));
           throw forwardError;
