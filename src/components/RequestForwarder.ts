@@ -165,11 +165,13 @@ export class RequestForwarder implements IRequestForwarder {
             method: 'POST',
             headers,
             agent: isHttps ? this.httpsAgent : this.httpAgent,
+            family: 4,
           }, (res) => {
             clearTimeout(timeoutId);
             resolve(res);
           });
-          
+          upstreamReq.setNoDelay(true);
+
           upstreamReq.on('error', (err) => {
             clearTimeout(timeoutId);
             reject(err);
@@ -263,7 +265,8 @@ export class RequestForwarder implements IRequestForwarder {
     const options = {
       method: req.method,
       headers,
-      agent: targetUrl.protocol === 'https:' ? this.httpsAgent : this.httpAgent
+      agent: targetUrl.protocol === 'https:' ? this.httpsAgent : this.httpAgent,
+      family: 4,
     };
 
     const fetchRequest = targetUrl.protocol === 'https:' ? https.request : http.request;
@@ -275,6 +278,7 @@ export class RequestForwarder implements IRequestForwarder {
         upstreamRes.on('end', () => resolve());
         upstreamRes.on('error', (err) => reject(err));
       });
+      upstreamReq.setNoDelay(true);
       
       upstreamReq.on('error', (err) => {
         res.writeHead(502);
@@ -330,6 +334,7 @@ export class RequestForwarder implements IRequestForwarder {
         method: 'POST',
         headers,
         agent: isHttps ? this.httpsAgent : this.httpAgent,
+        family: 4,
       };
 
       upstreamReq = transport.request(options, (upstreamRes: any) => {
@@ -367,6 +372,8 @@ export class RequestForwarder implements IRequestForwarder {
           reject(err);
         });
       });
+
+      upstreamReq.setNoDelay(true);
 
       upstreamReq.on('error', (error: any) => {
         clearTimeout(timeoutId);
