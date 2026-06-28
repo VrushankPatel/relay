@@ -4,9 +4,10 @@
 
 ### Added
 - **Docker Support**: Added multi-stage `Dockerfile` and `docker-compose.yml` for zero-install, containerized deployments. Persists OAuth device flow tokens across restarts.
-- **Native Gemini Format**: Integrated support for Google's Gemini API request (`contents` / `generationConfig`) and response (`candidates` / `usageMetadata`) formats, translating them to and fromcanonical types.
+- **Native Gemini Format**: Integrated support for Google's Gemini API request (`contents` / `generationConfig`) and response (`candidates` / `usageMetadata`) formats, translating them to and from canonical types.
 - **In-flight Stream Translation**: Formats streaming chunks from OpenAI or Anthropic provider protocols directly into Gemini's stream format in flight.
 - **CI/CD Workflow**: Added GitHub Actions workflow (`docker-publish.yml`) to automatically build, test, and publish Docker images to GHCR on tags.
+- **Makefile Orchestration**: Added a GNU `Makefile` wrapping common workflows (`install`, `build`, `test`, `typecheck`, `docker-build`, `docker-up`, `docker-down`, `clean`) to simplify orchestration.
 
 ### Verified
 - **Claude Code**: Verified and documented integration using `ANTHROPIC_BASE_URL` with pay-as-you-go key billing.
