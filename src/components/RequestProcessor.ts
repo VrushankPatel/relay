@@ -38,6 +38,10 @@ export class RequestProcessor implements IRequestProcessor {
       frequency_penalty: req.frequency_penalty ?? 0,
       stream: req.stream ?? false,
       tools: req.tools,
+      tool_choice: req.tool_choice,
+      stop: req.stop,
+      suffix: req.suffix,
+      language: req.language,
     };
   }
   
@@ -71,7 +75,12 @@ export class RequestProcessor implements IRequestProcessor {
       normalized.top_p.toString(),
       normalized.max_tokens.toString(),
       normalized.presence_penalty.toString(),
-      normalized.frequency_penalty.toString()
+      normalized.frequency_penalty.toString(),
+      normalized.stop ? JSON.stringify(normalized.stop) : '',
+      normalized.tools ? JSON.stringify(normalized.tools) : '',
+      normalized.tool_choice ? JSON.stringify(normalized.tool_choice) : '',
+      normalized.suffix || '',
+      normalized.language || ''
     ];
     
     const concatenated = components.join('||');

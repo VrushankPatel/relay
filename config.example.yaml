@@ -6,6 +6,10 @@ server:
   host: '0.0.0.0'
   maxConcurrentRequests: 100
   requestTimeoutMs: 30000
+  # tls:
+  #   enabled: true
+  #   certPath: "/path/to/cert.pem"
+  #   keyPath: "/path/to/key.pem"
 
 # ── Provider Configuration ──
 # Choose ONE provider as your upstream LLM backend.
@@ -36,9 +40,14 @@ cache:
   maxEntries: 10000
   ttlHours: 24
 
-# ── Fuzzy Cache (opt-in, off by default) ──
+# ── Fuzzy Cache (EXPERIMENTAL — opt-in, off by default) ──
+# WARNING: Fuzzy cache is experimental. For code completions, a cached response
+# from a similar-but-different context can be more harmful than no response.
+# Only enable this with minimumSimilarityPercent >= 95 and only for chat
+# endpoints, never for inline completions.
 fuzzyCache:
   enabled: false
+  minimumSimilarityPercent: 97
   maxTokenEditDistance: 3
   maxEntries: 100
   rapidEditWindowMs: 5000

@@ -43,6 +43,8 @@ export class CompatibilityLayer implements ICompatibilityLayer {
     if (b.stop) request.stop = b.stop as string | string[];
     if (b.tools && Array.isArray(b.tools)) request.tools = b.tools as any[];
     if (b.tool_choice) request.tool_choice = b.tool_choice as any;
+    if (typeof b.suffix === 'string') request.suffix = b.suffix;
+    if (typeof b.language === 'string') request.language = b.language;
     if (typeof b.user === 'string') request.user = b.user;
 
     return request;
@@ -71,6 +73,9 @@ export class CompatibilityLayer implements ICompatibilityLayer {
 
     if (typeof b.temperature === 'number') request.temperature = b.temperature;
     if (typeof b.max_tokens === 'number') request.max_tokens = b.max_tokens;
+    if (b.stop) request.stop = b.stop as string | string[];
+    if (typeof b.suffix === 'string') request.suffix = b.suffix;
+    if (typeof b.language === 'string') request.language = b.language;
 
     return request;
   }
@@ -146,6 +151,60 @@ export class CompatibilityLayer implements ICompatibilityLayer {
       }))
     };
     return `data: ${JSON.stringify(payload)}\n\n`;
+  }
+
+  public synthesizeOpenAIStreamChunks(response: InternalChatResponse): string[] {
+    const chunks: string[] = [];
+    const choice = response.choices[0];
+    const fullContent = choice?.message?.content || '';
+    
+    // First chunk with role
+    chunks.push(this.formatOpenAIStreamChunk({
+      id: response.id,
+      created: response.created,
+      model: response.model,
+      system_fingerprint: response.system_fingerprint,
+      choices: [{
+        index: choice?.index || 0,
+        delta: { role: choice?.message?.role || 'assistant', content: '' },
+        finish_reason: null
+      }]
+    }));
+
+    // Content chunks (split roughly every 50 chars for realistic streaming)
+    let pos = 0;
+    while (pos < fullContent.length) {
+      const nextPos = Math.min(pos + 50, fullContent.length);
+      const piece = fullContent.substring(pos, nextPos);
+      chunks.push(this.formatOpenAIStreamChunk({
+        id: response.id,
+        created: response.created,
+        model: response.model,
+        system_fingerprint: response.system_fingerprint,
+        choices: [{
+          index: choice?.index || 0,
+          delta: { content: piece },
+          finish_reason: null
+        }]
+      }));
+      pos = nextPos;
+    }
+
+    // Final chunk with finish_reason
+    chunks.push(this.formatOpenAIStreamChunk({
+      id: response.id,
+      created: response.created,
+      model: response.model,
+      system_fingerprint: response.system_fingerprint,
+      choices: [{
+        index: choice?.index || 0,
+        delta: {},
+        finish_reason: choice?.finish_reason || 'stop'
+      }]
+    }));
+
+    chunks.push('data: [DONE]\n\n');
+    return chunks;
   }
 
   public formatAnthropicResponse(response: InternalChatResponse): unknown {

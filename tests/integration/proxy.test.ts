@@ -77,6 +77,7 @@ describe('Relay Proxy Integration Tests', () => {
     const fuzzyGuard = new FuzzyGuard({
       enabled: true,
       maxTokenEditDistance: 5,
+      minimumSimilarityPercent: 80,
       maxEntries: 100,
       rapidEditWindowMs: 5000,
       rapidEditThreshold: 3, // over 3 distinct requests in 5s kills it
@@ -102,6 +103,18 @@ describe('Relay Proxy Integration Tests', () => {
       const count = await cacheManager.invalidate();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'success', invalidatedCount: count }));
+    });
+
+    gateway.setPassthroughHandler(async (req, res) => {
+      const url = req.url || '';
+      try {
+        await requestForwarder.passthrough(req, res, provider, url);
+      } catch (err: any) {
+        if (!res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }));
+        }
+      }
     });
     
     gateway.setRequestHandler(async (req) => {
@@ -243,7 +256,7 @@ describe('Relay Proxy Integration Tests', () => {
 
   it('1. Exact Caching: serves identical requests from cache', async () => {
     mockRequestCount = 0;
-    const reqData = { model: 'gpt-4o', messages: [{ role: 'user', content: 'this is a completely unique string for exact caching that shares no words' }] };
+    const reqData = { model: 'gpt-4o', messages: [{ role: 'user', content: 'this is a completely unique string for exact caching that shares no words' }], temperature: 0 };
 
     const res1 = await sendPost(reqData);
     expect(res1.statusCode).toBe(200);
@@ -258,8 +271,8 @@ describe('Relay Proxy Integration Tests', () => {
 
   it('2. Fuzzy Caching: serves slightly different requests from cache', async () => {
     mockRequestCount = 0;
-    const reqData1 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'a completely different sentence for testing fuzzy logic exclusively' }] };
-    const reqData2 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'a completely different sentence for testing fuzzy logic exclusively!!' }] }; // small diff
+    const reqData1 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'a completely different sentence for testing fuzzy logic exclusively' }], temperature: 0 };
+    const reqData2 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'a completely different sentence for testing fuzzy logic exclusively!!' }], temperature: 0 }; // small diff
 
     const res1 = await sendPost(reqData1);
     expect(res1.statusCode).toBe(200);
@@ -277,11 +290,11 @@ describe('Relay Proxy Integration Tests', () => {
     // We already have some distinct hashes in the cache from previous tests.
     // The fuzzy kill switch triggers if we have > 3 distinct requests in the rapidEditWindowMs (5000).
     // Let's send 4 distinct requests rapidly.
-    const req1 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 1' }] };
-    const req2 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 2' }] };
-    const req3 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 3' }] };
-    const req4 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 4' }] };
-    const req5 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 5' }] }; // This one should be exact match only
+    const req1 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 1' }], temperature: 0 };
+    const req2 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 2' }], temperature: 0 };
+    const req3 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 3' }], temperature: 0 };
+    const req4 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 4' }], temperature: 0 };
+    const req5 = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 5' }], temperature: 0 }; // This one should be exact match only
 
     await sendPost(req1); // miss
     await sendPost(req2); // miss
@@ -290,7 +303,7 @@ describe('Relay Proxy Integration Tests', () => {
     
     // Kill switch should now be engaged (we've sent 4 requests in rapid succession).
     // Now if we send a 5th request that is a fuzzy match to req4 (e.g., test 4!), it should MISS because fuzzy is disabled.
-    const req4Fuzzy = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 4!' }] };
+    const req4Fuzzy = { model: 'gpt-4o', messages: [{ role: 'user', content: 'kill switch unique test 4!' }], temperature: 0 };
     
     const countBefore = mockRequestCount;
     const res5 = await sendPost(req4Fuzzy);
@@ -304,7 +317,7 @@ describe('Relay Proxy Integration Tests', () => {
     mockRequestCount = 0;
     mockResponseDelay = 100; // Slow down upstream to allow concurrency
 
-    const reqData = { model: 'gpt-4o', messages: [{ role: 'user', content: 'completely distinct dedup test string' }] };
+    const reqData = { model: 'gpt-4o', messages: [{ role: 'user', content: 'completely distinct dedup test string' }], temperature: 0 };
 
     const [res1, res2, res3] = await Promise.all([
       sendPost(reqData),
@@ -330,7 +343,8 @@ describe('Relay Proxy Integration Tests', () => {
   it('5. Gemini Support: routes and translates Gemini format', async () => {
     mockRequestCount = 0;
     const geminiReq = {
-      contents: [{ role: 'user', parts: [{ text: 'Explain gravity' }] }]
+      contents: [{ role: 'user', parts: [{ text: 'Explain gravity' }] }],
+      generationConfig: { temperature: 0 }
     };
 
     // First request - MISS
@@ -386,5 +400,15 @@ describe('Relay Proxy Integration Tests', () => {
       });
     });
     expect(postDiagRes.body.cache.size).toBe(0);
+  });
+
+  it('7. Passthrough: proxies non-completion requests without caching', async () => {
+    mockRequestCount = 0;
+    const reqData = { input: 'hello' };
+    const res = await sendPostPath('/v1/embeddings', reqData);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-cache']).toBeUndefined(); // Should not have cache headers
+    expect(res.body.model).toBe('mock-model');
+    expect(mockRequestCount).toBe(1);
   });
 });

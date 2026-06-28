@@ -31,6 +31,11 @@ export interface HTTPResponse {
 export type RequestHandler = (req: AuthenticatedRequest) => Promise<HTTPResponse>;
 
 /**
+ * Passthrough handler function type for proxying non-completion requests.
+ */
+export type PassthroughHandler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
+
+/**
  * Route handler for non-completion endpoints (health, metrics, etc).
  */
 export type RouteHandler = (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
@@ -88,6 +93,7 @@ export interface APIGateway {
 export class APIGatewayImpl implements APIGateway {
   private server: http.Server | null = null;
   private requestHandler: RequestHandler | null = null;
+  private passthroughHandler: PassthroughHandler | null = null;
   private activeConnections = 0;
   private readonly maxConcurrentRequests: number;
   private readonly requestTimeoutMs: number;
@@ -113,6 +119,14 @@ export class APIGatewayImpl implements APIGateway {
   }
 
   /**
+   * Set the handler for all unhandled routes (passthrough).
+   * @param handler - The passthrough handler function
+   */
+  setPassthroughHandler(handler: PassthroughHandler): void {
+    this.passthroughHandler = handler;
+  }
+
+  /**
    * Register a handler for a specific HTTP method + path.
    */
   registerRoute(method: string, path: string, handler: RouteHandler): void {
@@ -131,9 +145,9 @@ export class APIGatewayImpl implements APIGateway {
   /**
    * Start the HTTP server.
    */
-  async start(host: string, port: number): Promise<void> {
+  async start(host: string, port: number, tlsConfig?: { enabled: boolean; certPath: string; keyPath: string }): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.server = http.createServer((req, res) => {
+      const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
         this.handleHttpRequest(req, res).catch((error) => {
           getLogger().error({ error, url: req.url }, 'Unhandled error in request handler');
           if (!res.headersSent) {
@@ -144,7 +158,25 @@ export class APIGatewayImpl implements APIGateway {
             }));
           }
         });
-      });
+      };
+
+      if (tlsConfig?.enabled && tlsConfig.certPath && tlsConfig.keyPath) {
+        try {
+          const https = require('https');
+          const fs = require('fs');
+          const options = {
+            cert: fs.readFileSync(tlsConfig.certPath),
+            key: fs.readFileSync(tlsConfig.keyPath)
+          };
+          this.server = https.createServer(options, handler);
+        } catch (error) {
+          getLogger().error({ error }, 'Failed to initialize TLS/HTTPS server');
+          reject(error);
+          return;
+        }
+      } else {
+        this.server = http.createServer(handler);
+      }
 
       this.server.on('error', (error) => {
         getLogger().error({ error }, 'Server error');
@@ -269,14 +301,18 @@ export class APIGatewayImpl implements APIGateway {
 
         if (req.method !== 'POST' || (!isStandardPath && !isGeminiPath)) {
           clearTimeout(timeoutId);
-          await this.sendResponse(res, {
-            statusCode: 404,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              error: 'Not found',
-              code: 'NOT_FOUND'
-            })
-          });
+          if (this.passthroughHandler) {
+            await this.passthroughHandler(req, res);
+          } else {
+            await this.sendResponse(res, {
+              statusCode: 404,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                error: 'Not found',
+                code: 'NOT_FOUND'
+              })
+            });
+          }
           return;
         }
 

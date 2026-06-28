@@ -3,6 +3,7 @@ import { createChildLogger } from '../utils/logger.js';
 
 export interface FuzzyGuardConfig {
   enabled: boolean;
+  minimumSimilarityPercent: number;
   maxTokenEditDistance: number;
   maxEntries: number;
   rapidEditWindowMs: number;
@@ -11,6 +12,7 @@ export interface FuzzyGuardConfig {
 
 export const DEFAULT_FUZZY_GUARD_CONFIG: FuzzyGuardConfig = {
   enabled: false,
+  minimumSimilarityPercent: 97,
   maxTokenEditDistance: 3,
   maxEntries: 100,
   rapidEditWindowMs: 5000,
@@ -88,6 +90,11 @@ export class FuzzyGuard implements IFuzzyGuard {
 
   lookup(normalized: NormalizedChatRequest, contextHash: string): ChatCacheEntry | null {
     if (!this.config.enabled) {
+      return null;
+    }
+
+    if ((normalized.temperature ?? 0) > 0) {
+      this.logger.info('Fuzzy lookup skipped: temperature > 0');
       return null;
     }
 
@@ -238,6 +245,8 @@ export class FuzzyGuard implements IFuzzyGuard {
 
     // 5. Per-message comparison
     let maxDistance = 0;
+    let totalDistance = 0;
+    let totalWords = 0;
     const messageDiffs: { index: number; distance: number; diff: string }[] = [];
 
     for (let i = 0; i < query.messages.length; i++) {
@@ -262,6 +271,11 @@ export class FuzzyGuard implements IFuzzyGuard {
       const sContent = sMsg.content ?? '';
       const distance = wordLevelEditDistance(qContent, sContent);
 
+      const qWords = qContent.split(/\s+/).filter(w => w.length > 0);
+      const sWords = sContent.split(/\s+/).filter(w => w.length > 0);
+      totalWords += Math.max(qWords.length, sWords.length);
+      totalDistance += distance;
+
       if (distance > this.config.maxTokenEditDistance) {
         return {
           match: false,
@@ -277,8 +291,6 @@ export class FuzzyGuard implements IFuzzyGuard {
       if (distance > 0) {
         maxDistance = Math.max(maxDistance, distance);
         // Generate a short diff summary
-        const qWords = qContent.split(/\s+/).filter(w => w.length > 0);
-        const sWords = sContent.split(/\s+/).filter(w => w.length > 0);
         const diffWords = qWords.filter(w => !sWords.includes(w)).slice(0, 5);
         messageDiffs.push({
           index: i,
@@ -288,10 +300,28 @@ export class FuzzyGuard implements IFuzzyGuard {
       }
     }
 
+    if (totalWords > 0) {
+      const similarityPercent = (1 - (totalDistance / totalWords)) * 100;
+      if (similarityPercent < this.config.minimumSimilarityPercent) {
+        return {
+          match: false,
+          details: {
+            reason: 'similarity_below_threshold',
+            similarityPercent,
+            threshold: this.config.minimumSimilarityPercent,
+          },
+        };
+      }
+    } else if (totalDistance > 0) {
+      return { match: false, details: { reason: 'similarity_below_threshold' } };
+    }
+
     return {
       match: true,
       details: {
         maxDistance,
+        totalDistance,
+        totalWords,
         messageDiffs,
         totalMessages: query.messages.length,
       },

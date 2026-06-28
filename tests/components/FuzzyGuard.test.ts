@@ -65,7 +65,7 @@ describe('FuzzyGuard', () => {
   let guard: FuzzyGuard;
 
   beforeEach(() => {
-    guard = new FuzzyGuard({ enabled: true, maxTokenEditDistance: 3 });
+    guard = new FuzzyGuard({ enabled: true, maxTokenEditDistance: 3, minimumSimilarityPercent: 90 });
   });
 
   describe('exact content match', () => {
@@ -83,8 +83,8 @@ describe('FuzzyGuard', () => {
 
   describe('1-word diff within threshold', () => {
     it('should return cached entry when content differs by 1 word within threshold', () => {
-      const stored = makeRequest({ messages: [{ role: 'user', content: 'hello world foo bar' }] });
-      const query = makeRequest({ messages: [{ role: 'user', content: 'hello world foo baz' }] });
+      const stored = makeRequest({ messages: [{ role: 'user', content: 'this is a long sentence with many words to pass the high percentage threshold test' }] });
+      const query = makeRequest({ messages: [{ role: 'user', content: 'this is a long sentence with many words to pass the high percentage threshold baz' }] });
       const entry = makeEntry('hash1');
 
       guard.store(stored, 'hash1', entry);
@@ -166,6 +166,19 @@ describe('FuzzyGuard', () => {
   describe('different temperature', () => {
     it('should return null when temperatures differ', () => {
       const stored = makeRequest({ temperature: 0 });
+      const query = makeRequest({ temperature: 0 });
+      // wait, the previous test was checking if temperatures differ they don't match.
+      // But now if temperature > 0 it skips lookup entirely!
+      // Let's test the original check first
+      const stored2 = makeRequest({ temperature: 0 });
+      const query2 = makeRequest({ temperature: 0, top_p: 0.5 });
+      const entry = makeEntry('hash1');
+      guard.store(stored2, 'hash1', entry);
+      expect(guard.lookup(query2, 'hash2')).toBeNull();
+    });
+
+    it('should return null immediately if temperature > 0', () => {
+      const stored = makeRequest({ temperature: 0 });
       const query = makeRequest({ temperature: 0.5 });
       const entry = makeEntry('hash1');
 
@@ -173,6 +186,35 @@ describe('FuzzyGuard', () => {
       const result = guard.lookup(query, 'hash2');
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('minimum similarity percent', () => {
+    it('should return null when similarity is below threshold', () => {
+      // 90% threshold, max edit distance 3.
+      // "hello world foo bar" (4 words). Changing 1 word is 75% similarity.
+      const stored = makeRequest({ messages: [{ role: 'user', content: 'hello world foo bar' }] });
+      const query = makeRequest({ messages: [{ role: 'user', content: 'hello world foo baz' }] });
+      const entry = makeEntry('hash1');
+
+      // The similarity is 75%, which is < 90%, so it should return null despite being within maxTokenEditDistance
+      guard.store(stored, 'hash1', entry);
+      const result = guard.lookup(query, 'hash2');
+
+      expect(result).toBeNull();
+    });
+
+    it('should return match when similarity is above threshold', () => {
+      // 90% threshold. "this is a very long string with many words to test the similarity percentage feature" (16 words).
+      // changing 1 word gives 15/16 = 93.75% similarity.
+      const stored = makeRequest({ messages: [{ role: 'user', content: 'this is a very long string with many words to test the similarity percentage feature' }] });
+      const query = makeRequest({ messages: [{ role: 'user', content: 'this is a very long string with many words to test the similarity percentage bug' }] });
+      const entry = makeEntry('hash1');
+
+      guard.store(stored, 'hash1', entry);
+      const result = guard.lookup(query, 'hash2');
+
+      expect(result).not.toBeNull();
     });
   });
 

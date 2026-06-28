@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     await cacheManager.initialize();
     const fuzzyGuard = new FuzzyGuard({
       enabled: config.fuzzyCache?.enabled || false,
+      minimumSimilarityPercent: config.fuzzyCache?.minimumSimilarityPercent || 97,
       maxTokenEditDistance: config.fuzzyCache?.maxTokenEditDistance || 3,
       maxEntries: config.fuzzyCache?.maxEntries || 100,
       rapidEditWindowMs: config.fuzzyCache?.rapidEditWindowMs || 5000,
@@ -205,6 +206,20 @@ async function main(): Promise<void> {
       }
     });
 
+    gateway.setPassthroughHandler(async (req, res) => {
+      const log = createChildLogger('Passthrough');
+      const url = req.url || '';
+      log.info({ method: req.method, url }, 'Passthrough routing request');
+      try {
+        await requestForwarder.passthrough(req, res, provider, url);
+      } catch (err: any) {
+        log.error({ error: err.message }, 'Passthrough error');
+        if (!res.headersSent) {
+          sendJson(res, 502, { error: 'Bad Gateway', message: err.message });
+        }
+      }
+    });
+
     // 5. Authentication
     gateway.setAuthenticator(async (apiKey) => {
       if (config.security?.apiKey) {
@@ -269,72 +284,71 @@ async function main(): Promise<void> {
           return compatibilityLayer.formatOpenAIResponse(internalRes);
         };
 
+        const replayCacheStream = async function* (response: InternalChatResponse) {
+          if (isGemini) {
+            yield compatibilityLayer.formatGeminiStreamChunk({
+              content: response.choices[0].message.content,
+              finishReason: response.choices[0].finish_reason
+            });
+          } else if (pathUrl !== '/v1/messages') {
+            const chunks = compatibilityLayer.synthesizeOpenAIStreamChunks(response);
+            for (const chunk of chunks) {
+              yield chunk;
+              await new Promise(r => setTimeout(r, 5)); // 5ms delay
+            }
+          } else {
+            yield JSON.stringify(formatResponse(response));
+          }
+        };
+
+        const shouldBypass = cacheManager.shouldBypassCache(normalized);
+
         // B. Cache Lookup
-        try {
-          const exactMatch = await cacheManager.lookupExact(contextHash);
+        if (!shouldBypass) {
+          try {
+            const exactMatch = await cacheManager.lookupExact(contextHash);
           if (exactMatch) {
             log.info('Cache hit (exact)');
-            // If requested stream but cache is complete object, we could theoretically synthesize SSE.
-            // For now, we return it. (If they want real stream synthesis from cache, we'd do it here).
-            // But returning the JSON is often acceptable if the IDE handles both. Let's assume JSON is fine or we synthesize:
             if (chatReq.stream) {
-              if (isGemini) {
-                const streamData = compatibilityLayer.formatGeminiStreamChunk({
-                  content: exactMatch.response.choices[0].message.content,
-                  finishReason: exactMatch.response.choices[0].finish_reason
-                });
-                return sendResponse(200, streamData, true, true);
-              } else if (pathUrl !== '/v1/messages') {
-                // Synthesize OpenAI stream
-                const streamData = `data: ${JSON.stringify(formatResponse(exactMatch.response))}\n\ndata: [DONE]\n\n`;
-                return sendResponse(200, streamData, true, true);
-              }
+              return sendResponse(200, replayCacheStream(exactMatch.response), true, true);
             }
             return sendResponse(200, formatResponse(exactMatch.response), true, false);
           }
-        } catch (e) {
-          log.warn({ error: e }, 'Cache exact lookup failed');
-        }
+          } catch (e) {
+            log.warn({ error: e }, 'Cache exact lookup failed');
+          }
 
-        if (config.fuzzyCache?.enabled) {
+          if (config.fuzzyCache?.enabled) {
           try {
             const similarMatch = fuzzyGuard.lookup(normalized, contextHash);
             if (similarMatch) {
               log.info('Cache hit (fuzzy)');
               if (chatReq.stream) {
-                if (isGemini) {
-                  const streamData = compatibilityLayer.formatGeminiStreamChunk({
-                    content: similarMatch.response.choices[0].message.content,
-                    finishReason: similarMatch.response.choices[0].finish_reason
-                  });
-                  return sendResponse(200, streamData, true, true);
-                } else if (pathUrl !== '/v1/messages') {
-                  const streamData = `data: ${JSON.stringify(formatResponse(similarMatch.response))}\n\ndata: [DONE]\n\n`;
-                  return sendResponse(200, streamData, true, true);
-                }
+                return sendResponse(200, replayCacheStream(similarMatch.response), true, true);
               }
               return sendResponse(200, formatResponse(similarMatch.response), true, false);
             }
           } catch (e) {
             log.warn({ error: e }, 'Cache fuzzy lookup failed');
           }
-        }
-
-        // C. Deduplication
-        if (dedupManager.isDuplicate(contextHash)) {
-          log.info('Deduplicated request');
-          if (chatReq.stream) {
-            return sendResponse(200, dedupManager.waitForStream(contextHash), true, true);
-          } else {
-            const dedupResponse = await dedupManager.waitForCompletion(contextHash);
-            if (dedupResponse !== PROMOTE_TO_PRIMARY) {
-              return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true, false);
-            }
-            log.info('Waiter promoted to primary, executing upstream call');
           }
-        } else {
-          await dedupManager.registerRequest(contextHash, chatReq.stream);
-        }
+
+          // C. Deduplication
+          if (dedupManager.isDuplicate(contextHash)) {
+            log.info('Deduplicated request');
+            if (chatReq.stream) {
+              return sendResponse(200, dedupManager.waitForStream(contextHash), true, true);
+            } else {
+              const dedupResponse = await dedupManager.waitForCompletion(contextHash);
+              if (dedupResponse !== PROMOTE_TO_PRIMARY) {
+                return sendResponse(200, formatResponse(dedupResponse as InternalChatResponse), true, false);
+              }
+              log.info('Waiter promoted to primary, executing upstream call');
+            }
+          } else {
+            await dedupManager.registerRequest(contextHash, chatReq.stream);
+          }
+        } // end if (!shouldBypass)
 
         // D. Forward
         try {
@@ -350,10 +364,14 @@ async function main(): Promise<void> {
                     const parsedProviderChunk = compatibilityLayer.parseProviderStreamChunk(chunk, provider.id);
                     clientChunk = compatibilityLayer.formatGeminiStreamChunk(parsedProviderChunk);
                   }
-                  dedupManager.addStreamChunk(contextHash, clientChunk);
+                  if (!shouldBypass) {
+                    dedupManager.addStreamChunk(contextHash, clientChunk);
+                  }
                   yield clientChunk;
                 }
-                dedupManager.completeStream(contextHash);
+                if (!shouldBypass) {
+                  dedupManager.completeStream(contextHash);
+                }
 
                 if (provider.assembleStream) {
                   try {
@@ -368,9 +386,11 @@ async function main(): Promise<void> {
                       inputTokens: internalResponse.usage?.prompt_tokens || 0,
                       outputTokens: internalResponse.usage?.completion_tokens || 0,
                     };
-                    await cacheManager.store(contextHash, entry);
-                    if (config.fuzzyCache?.enabled) {
-                      fuzzyGuard.store(normalized, contextHash, entry);
+                    if (!shouldBypass) {
+                      await cacheManager.store(contextHash, entry);
+                      if (config.fuzzyCache?.enabled) {
+                        fuzzyGuard.store(normalized, contextHash, entry);
+                      }
                     }
                   } catch (e) {
                     log.warn({ error: e }, 'Cache stream assembly/store failed');
@@ -405,12 +425,16 @@ async function main(): Promise<void> {
             log.warn({ error: e }, 'Cache store failed');
           }
 
-          dedupManager.completeRequest(contextHash, internalResponse as any);
+          if (!shouldBypass) {
+            dedupManager.completeRequest(contextHash, internalResponse as any);
+          }
           log.info('Cache miss - forwarded to provider');
           return sendResponse(200, formatResponse(internalResponse), false, false);
           }
         } catch (forwardError) {
-          dedupManager.failRequest(contextHash, forwardError instanceof Error ? forwardError : new Error(String(forwardError)));
+          if (!shouldBypass) {
+            dedupManager.failRequest(contextHash, forwardError instanceof Error ? forwardError : new Error(String(forwardError)));
+          }
           throw forwardError;
         }
 
@@ -429,7 +453,7 @@ async function main(): Promise<void> {
       logger.info('Configuration updated via hot-reload');
     });
 
-    await gateway.start(config.server.host, config.server.port);
+    await gateway.start(config.server.host, config.server.port, config.server.tls);
     logger.info({ host: config.server.host, port: config.server.port, provider: provider.id }, 'Relay Proxy started');
 
     const shutdown = async (signal: string) => {

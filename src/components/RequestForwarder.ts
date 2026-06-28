@@ -17,6 +17,7 @@ type CircuitState = 'closed' | 'open' | 'half-open';
 export interface IRequestForwarder {
   forward(req: InternalChatRequest, provider: IProvider): Promise<InternalChatResponse>;
   forwardStream(req: InternalChatRequest, provider: IProvider): AsyncIterable<string>;
+  passthrough(req: http.IncomingMessage, res: http.ServerResponse, provider: IProvider, pathUrl: string): Promise<void>;
   checkHealth(): Promise<boolean>;
   getPoolStats(): PoolStatistics;
   destroy(): void;
@@ -237,6 +238,58 @@ export class RequestForwarder implements IRequestForwarder {
     }
 
     throw lastError || new Error('Stream request failed');
+  }
+
+  async passthrough(req: http.IncomingMessage, res: http.ServerResponse, provider: IProvider, pathUrl: string): Promise<void> {
+    const headers = await provider.getHeaders();
+    
+    // Copy incoming headers that are safe
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (key.toLowerCase() !== 'host' && key.toLowerCase() !== 'authorization' && value) {
+         headers[key] = Array.isArray(value) ? value.join(', ') : value;
+      }
+    }
+
+    let endpointUrl = provider.getEndpointUrl();
+    let targetUrlStr = endpointUrl;
+    
+    // Attempt to derive baseUrl
+    if (targetUrlStr.endsWith('/v1/chat/completions')) {
+      targetUrlStr = targetUrlStr.substring(0, targetUrlStr.length - '/v1/chat/completions'.length) + pathUrl;
+    } else if (targetUrlStr.endsWith('/chat/completions')) {
+      targetUrlStr = targetUrlStr.substring(0, targetUrlStr.length - '/chat/completions'.length) + pathUrl.replace(/^\/v1/, '');
+    } else if (targetUrlStr.endsWith('/v1/messages')) {
+      targetUrlStr = targetUrlStr.substring(0, targetUrlStr.length - '/v1/messages'.length) + pathUrl;
+    } else {
+      targetUrlStr = new URL(pathUrl, endpointUrl).toString();
+    }
+
+    const targetUrl = new URL(targetUrlStr);
+    
+    const options = {
+      method: req.method,
+      headers,
+      agent: targetUrl.protocol === 'https:' ? this.httpsAgent : this.httpAgent
+    };
+
+    const fetchRequest = targetUrl.protocol === 'https:' ? https.request : http.request;
+    
+    return new Promise((resolve, reject) => {
+      const upstreamReq = fetchRequest(targetUrl, options, (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode || 200, upstreamRes.headers);
+        upstreamRes.pipe(res);
+        upstreamRes.on('end', () => resolve());
+        upstreamRes.on('error', (err) => reject(err));
+      });
+      
+      upstreamReq.on('error', (err) => {
+        res.writeHead(502);
+        res.end(JSON.stringify({ error: 'Bad Gateway', message: err.message }));
+        resolve();
+      });
+
+      req.pipe(upstreamReq);
+    });
   }
 
   async checkHealth(): Promise<boolean> {

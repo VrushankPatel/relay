@@ -45,6 +45,8 @@ export interface InternalChatRequest {
   frequency_penalty?: number;
   tools?: ToolDefinition[];
   tool_choice?: string | { type: string; function?: { name: string } };
+  suffix?: string;
+  language?: string;
   user?: string;
 }
 
@@ -59,6 +61,10 @@ export interface NormalizedChatRequest {
   frequency_penalty: number;
   stream: boolean;
   tools?: ToolDefinition[];
+  tool_choice?: string | { type: string; function?: { name: string } };
+  stop?: string | string[];
+  suffix?: string;
+  language?: string;
 }
 
 /** Internal chat response */

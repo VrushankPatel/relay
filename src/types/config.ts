@@ -46,7 +46,7 @@ export interface Configuration {
   provider?: any;
 
   /** Fuzzy cache configuration */
-  fuzzyCache?: any;
+  fuzzyCache?: FuzzyCacheConfig;
 }
 
 /**
@@ -75,6 +75,13 @@ export interface ServerConfig {
   
   /** Request timeout in milliseconds before returning 503 Service Unavailable */
   requestTimeoutMs: number;
+
+  /** Optional TLS configuration for HTTPS */
+  tls?: {
+    enabled: boolean;
+    certPath: string;
+    keyPath: string;
+  };
 }
 
 /**
@@ -193,3 +200,27 @@ export interface CacheBypassConfig {
   /** Whether to bypass cache when tools with side effects are present */
   bypassOnToolsWithSideEffects: boolean;
 }
+
+/**
+ * Fuzzy cache configuration.
+ */
+export interface FuzzyCacheConfig {
+  /** Whether fuzzy caching is enabled */
+  enabled: boolean;
+  
+  /** Minimum similarity percentage (0-100) */
+  minimumSimilarityPercent: number;
+  
+  /** Maximum token edit distance for individual messages */
+  maxTokenEditDistance: number;
+  
+  /** Maximum number of entries in the fuzzy cache */
+  maxEntries: number;
+  
+  /** Window for rapid edits in milliseconds */
+  rapidEditWindowMs: number;
+  
+  /** Threshold for rapid edits before engaging kill switch */
+  rapidEditThreshold: number;
+}
+

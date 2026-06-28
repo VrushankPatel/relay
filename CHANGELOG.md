@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0] - 2026-06-28
+
+### Added
+- **Global Proxy Passthrough**: Implemented a catch-all route for non-completion endpoints (e.g., `/v1/models`, `/v1/embeddings`), ensuring the proxy gracefully passes through unknown endpoints to the upstream provider without breaking or caching them.
+- **TLS/HTTPS Support**: Added native HTTPS server startup via `server.tls` configuration, allowing direct encrypted deployment of the Relay proxy without needing a reverse proxy.
+- **Streaming SSE Cache Replay**: Implemented real-time Server-Sent Events (SSE) replay of cached responses. Cache hits now stream back to the client natively instead of blocking and dumping the full response at once.
+
+### Fixed
+- **Fuzzy Cache Hardening**: Disabled fuzzy caching by default. Added temperature guards to skip fuzzy cache lookups for code completion scenarios (`temperature > 0`), ensuring context-sensitive accuracy is preserved.
+- **Cache Key Semantics**: Added `suffix`, `language`, `stop`, `tools`, and `tool_choice` to the cache context hash to strictly prevent incorrect coalescing or cache hits when these parameters differ.
+- **Cache Bypass Enforcement**: Strictly enforced cache bypass rules for requests with `temperature > 0` or function calls, applying this across deduplication and storage layers to prevent deterministic corruption.
+
 ## [2.0.1] - 2026-06-28
 
 ### Added
