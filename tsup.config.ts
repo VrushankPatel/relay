@@ -11,5 +11,8 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   dts: true,
+  loader: {
+    '.html': 'text'
+  },
   minify: false,
 });

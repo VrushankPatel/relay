@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relay Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            heading: ['Plus Jakarta Sans', 'sans-serif'],
+          },
+          colors: {
+            border: {
+              light: '#e2e8f0',
+              dark: '#1e293b'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Premium glassmorphism effects */
+    .glass-card {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .dark .glass-card {
+      background: rgba(15, 23, 42, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .light .glass-card {
+      background: rgba(255, 255, 255, 0.7);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+    }
+    
+    /* Radial gradient backgrounds */
+    .dark-bg {
+      background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #09090b 100%);
+    }
+    .light-bg {
+      background: radial-gradient(circle at 50% 0%, #e0e7ff 0%, #f8fafc 100%);
+    }
+
+    /* Glow highlights */
+    .dark .glow-box:hover {
+      box-shadow: 0 0 25px rgba(99, 102, 241, 0.15);
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+    .light .glow-box:hover {
+      box-shadow: 0 10px 30px rgba(99, 102, 241, 0.08);
+      border-color: rgba(99, 102, 241, 0.25);
+    }
+  </style>
+</head>
+<body class="min-h-screen font-sans transition-colors duration-300 dark-bg dark:text-slate-100 text-slate-800" id="body-el">
+  
+  <div class="max-w-6xl mx-auto px-4 py-8 md:py-12 space-y-8">
+    
+    <!-- Top Navbar / Header -->
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-6 border-b border-slate-200/50 dark:border-slate-800/60 gap-4">
+      <div class="flex items-center space-x-4">
+        <div class="p-2.5 bg-indigo-600 text-white rounded-xl shadow-lg shadow-indigo-600/30 flex items-center justify-center">
+          <i data-lucide="zap" class="w-6 h-6 animate-pulse"></i>
+        </div>
+        <div>
+          <h1 class="text-2xl md:text-3xl font-extrabold font-heading tracking-tight bg-gradient-to-r from-slate-900 to-indigo-950 dark:from-white dark:to-indigo-200 bg-clip-text text-transparent">
+            Relay Proxy
+          </h1>
+          <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400 font-medium">
+            LLM Cache & Concurrent Deduplication Proxy
+          </p>
+        </div>
+      </div>
+      
+      <!-- Theme & Secure badges -->
+      <div class="flex items-center space-x-3 self-start sm:self-center">
+        <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+          <span>Active</span>
+        </div>
+        
+        <!-- Light / Dark Mode Toggle Button -->
+        <button id="theme-toggle" class="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all shadow-sm">
+          <i data-lucide="sun" id="sun-icon" class="w-5 h-5 text-amber-500 hidden"></i>
+          <i data-lucide="moon" id="moon-icon" class="w-5 h-5 text-indigo-400 hidden"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Key Statistics Grid -->
+    <main class="space-y-8">
+      <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        
+        <!-- Card: Total Savings -->
+        <div class="glass-card glow-box rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-500 dark:text-slate-400 font-heading">Total Estimated Savings</h3>
+            <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500"><i data-lucide="dollar-sign"></i></div>
+          </div>
+          <div class="mt-4">
+            <span class="text-4xl font-extrabold font-heading bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 dark:from-emerald-400 dark:to-teal-300 bg-clip-text text-transparent" id="stats-savings">
+              $0.00
+            </span>
+            <p class="text-xs text-slate-400 mt-2 font-medium">Accumulated across all sessions</p>
+          </div>
+        </div>
+
+        <!-- Card: Total Requests -->
+        <div class="glass-card glow-box rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-500 dark:text-slate-400 font-heading">Total Requests</h3>
+            <div class="p-2 bg-indigo-500/10 rounded-lg text-indigo-500"><i data-lucide="activity"></i></div>
+          </div>
+          <div class="mt-4">
+            <span class="text-4xl font-extrabold font-heading text-slate-900 dark:text-white" id="stats-requests">
+              0
+            </span>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-2 font-medium flex justify-between">
+              <span id="stats-streaming">0 streaming</span>
+              <span class="border-l border-slate-300 dark:border-slate-800 mx-2"></span>
+              <span id="stats-standard">0 standard</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Hit Rate -->
+        <div class="glass-card glow-box rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-500 dark:text-slate-400 font-heading">Overall Hit Rate</h3>
+            <div class="p-2 bg-violet-500/10 rounded-lg text-violet-500"><i data-lucide="target"></i></div>
+          </div>
+          <div class="mt-4">
+            <span class="text-4xl font-extrabold font-heading text-slate-900 dark:text-white" id="stats-hitrate">
+              0.0%
+            </span>
+            <div class="text-xs text-slate-500 dark:text-slate-400 mt-2 font-medium flex justify-between">
+              <span id="stats-exact">0 exact hits</span>
+              <span class="border-l border-slate-300 dark:border-slate-800 mx-2"></span>
+              <span id="stats-fuzzy">0 fuzzy hits</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Deduplicated -->
+        <div class="glass-card glow-box rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-500 dark:text-slate-400 font-heading">Coalesced Requests</h3>
+            <div class="p-2 bg-amber-500/10 rounded-lg text-amber-500"><i data-lucide="layers"></i></div>
+          </div>
+          <div class="mt-4">
+            <span class="text-4xl font-extrabold font-heading text-slate-900 dark:text-white" id="stats-dedups">
+              0
+            </span>
+            <p class="text-xs text-slate-400 mt-2 font-medium">In-flight identical calls merged</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Visual Area Chart -->
+      <section class="glass-card rounded-2xl p-6 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
+          <div>
+            <h2 class="text-lg font-bold font-heading text-slate-950 dark:text-white">Savings Activity Graph</h2>
+            <p class="text-xs md:text-sm text-slate-500 dark:text-slate-400">Cumulative dollars saved daily over the past 30 days</p>
+          </div>
+          <div class="p-2 bg-indigo-500/10 text-indigo-500 rounded-lg self-start sm:self-center"><i data-lucide="line-chart"></i></div>
+        </div>
+        <div class="relative h-64 md:h-80 w-full" id="chart-wrapper">
+          <!-- Canvas for Chart.js -->
+        </div>
+      </section>
+
+      <!-- Provider Breakdown -->
+      <section class="space-y-4">
+        <h2 class="text-lg font-bold font-heading text-slate-950 dark:text-white flex items-center">
+          <i data-lucide="cpu" class="w-5 h-5 mr-2 text-indigo-500"></i>
+          Provider Breakdown
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="providers-container">
+          <!-- Dynamically filled with javascript -->
+        </div>
+      </section>
+
+      <!-- Security Status & Info -->
+      <section class="glass-card rounded-2xl p-6 shadow-sm space-y-6">
+        <div class="flex items-center space-x-2 pb-4 border-b border-slate-200/50 dark:border-slate-800/60">
+          <div class="p-2 bg-indigo-500/10 text-indigo-500 rounded-lg"><i data-lucide="shield-check"></i></div>
+          <div>
+            <h2 class="text-lg font-bold font-heading text-slate-950 dark:text-white">Security & Proxy Status</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Cache encryption configurations and parameters</p>
+          </div>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Encryption status -->
+          <div class="flex items-center justify-between p-4 rounded-xl bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800/50">
+            <div>
+              <span class="block text-sm font-semibold text-slate-900 dark:text-slate-100">Cache Encryption (AES-256-GCM)</span>
+              <span class="text-xs text-slate-500 dark:text-slate-400">Secures payloads persisted in local cache</span>
+            </div>
+            <span id="badge-encryption" class="px-2.5 py-1 rounded-full text-xs font-bold border"></span>
+          </div>
+
+          <!-- Secret status -->
+          <div class="flex items-center justify-between p-4 rounded-xl bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/60 dark:border-slate-800/50">
+            <div>
+              <span class="block text-sm font-semibold text-slate-900 dark:text-slate-100">Cache Signing Key</span>
+              <span class="text-xs text-slate-500 dark:text-slate-400">Entropy state of the encryption keys</span>
+            </div>
+            <span id="badge-secret" class="px-2.5 py-1 rounded-full text-xs font-bold border"></span>
+          </div>
+        </div>
+
+        <div class="text-xs text-slate-500 dark:text-slate-400 flex items-start bg-slate-50 dark:bg-slate-900/20 p-3 rounded-lg border border-slate-200/30 dark:border-slate-800/20">
+          <i data-lucide="info" class="w-4 h-4 mr-2 flex-shrink-0 text-indigo-500 mt-0.5"></i>
+          <span>
+            <strong>Privacy Guarantee:</strong> This proxy operates strictly as an administrative and analytical interface. Under no circumstances are your raw prompts, generated completions, context hashes, or personal keys stored in plaintext or rendered on this screen.
+          </span>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 dark:text-slate-400 pt-8 border-t border-slate-200/40 dark:border-slate-800/40">
+      <p>Relay Proxy Cache Admin Dashboard. Code licensed under MIT.</p>
+    </footer>
+
+  </div>
+
+  <script>
+    // Injected variables
+    window.__STATS__ = /*STATS_DATA_PLACEHOLDER*/ {};
+    window.__CONFIG__ = /*CONFIG_DATA_PLACEHOLDER*/ {};
+  </script>
+
+  <script>
+    // Theme Management
+    const themeBtn = document.getElementById('theme-toggle');
+    const bodyEl = document.getElementById('body-el');
+    const sunIcon = document.getElementById('sun-icon');
+    const moonIcon = document.getElementById('moon-icon');
+
+    function applyTheme(theme) {
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+        bodyEl.classList.add('dark-bg');
+        bodyEl.classList.remove('light-bg');
+        sunIcon.classList.remove('hidden');
+        moonIcon.classList.add('hidden');
+      } else {
+        document.documentElement.classList.add('light');
+        document.documentElement.classList.remove('dark');
+        bodyEl.classList.add('light-bg');
+        bodyEl.classList.remove('dark-bg');
+        sunIcon.classList.add('hidden');
+        moonIcon.classList.remove('hidden');
+      }
+      localStorage.setItem('theme', theme);
+    }
+
+    // Default or stored theme
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    applyTheme(savedTheme);
+
+    themeBtn.addEventListener('click', () => {
+      const isDark = document.documentElement.classList.contains('dark');
+      applyTheme(isDark ? 'light' : 'dark');
+      renderChart(); // Re-render chart to update grid colors
+    });
+  </script>
+
+  <script>
+    // Rendering logic using injected variables
+    const stats = window.__STATS__ || {};
+    const config = window.__CONFIG__ || {};
+
+    // 1. Overall stats
+    const totalRequests = stats.lifetime?.totalRequestsProxied || 0;
+    const exactHits = stats.lifetime?.totalExactCacheHits || 0;
+    const fuzzyHits = stats.lifetime?.totalFuzzyCacheHits || 0;
+    const totalHits = exactHits + fuzzyHits;
+    const hitRatePercent = totalRequests > 0 ? ((totalHits / totalRequests) * 100).toFixed(1) : '0.0';
+
+    document.getElementById('stats-savings').innerText = '$' + (stats.lifetime?.totalDollarsSaved || 0).toFixed(2);
+    document.getElementById('stats-requests').innerText = totalRequests.toLocaleString();
+    document.getElementById('stats-streaming').innerText = (stats.lifetime?.streamingRequests || 0).toLocaleString() + ' streaming';
+    document.getElementById('stats-standard').innerText = (stats.lifetime?.nonStreamingRequests || 0).toLocaleString() + ' standard';
+    
+    document.getElementById('stats-hitrate').innerText = hitRatePercent + '%';
+    document.getElementById('stats-exact').innerText = exactHits.toLocaleString() + ' exact';
+    document.getElementById('stats-fuzzy').innerText = fuzzyHits.toLocaleString() + ' fuzzy';
+    
+    document.getElementById('stats-dedups').innerText = (stats.lifetime?.totalDedupRequests || 0).toLocaleString();
+
+    // 2. Encryption metrics
+    const encryptCacheOn = config.security?.encryptCache !== false;
+    const badgeEnc = document.getElementById('badge-encryption');
+    if (encryptCacheOn) {
+      badgeEnc.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
+      badgeEnc.innerText = "AES-256 ENABLED";
+    } else {
+      badgeEnc.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20";
+      badgeEnc.innerText = "PLAINTEXT CACHE";
+    }
+
+    const autoGeneratedSecret = !config.security?.apiKey && !process.env?.RELAY_CACHE_SECRET;
+    const badgeSec = document.getElementById('badge-secret');
+    if (autoGeneratedSecret) {
+      badgeSec.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20";
+      badgeSec.innerText = "DYNAMIC SESSION KEY";
+    } else {
+      badgeSec.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
+      badgeSec.innerText = "CONFIG KEY LOADED";
+    }
+
+    // 3. Provider breakdown grid
+    const providersContainer = document.getElementById('providers-container');
+    const providers = stats.providers || {};
+    
+    if (Object.keys(providers).length === 0) {
+      providersContainer.innerHTML = `
+        <div class="col-span-full text-center p-8 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl text-slate-500">
+          <i data-lucide="cpu" class="w-8 h-8 mx-auto mb-2 text-slate-400"></i>
+          <span class="text-sm">No provider transactions logged yet.</span>
+        </div>
+      `;
+    } else {
+      providersContainer.innerHTML = '';
+      for (const [providerId, pStats] of Object.entries(providers)) {
+        const pRequests = pStats.requestsProxied || 0;
+        const pHits = (pStats.exactCacheHits || 0) + (pStats.fuzzyCacheHits || 0);
+        const pRatio = pRequests > 0 ? Math.round((pHits / pRequests) * 100) : 0;
+        
+        const cardHtml = `
+          <div class="glass-card glow-box rounded-2xl p-5 shadow-sm space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-200/50 dark:border-slate-800/60 pb-3">
+              <h3 class="font-bold font-heading text-base flex items-center capitalize">
+                <i data-lucide="server" class="w-4 h-4 mr-2 text-indigo-500"></i>
+                ${providerId}
+              </h3>
+              <span class="text-xs px-2 py-0.5 rounded-full font-bold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/10">
+                ${pRatio}% hits
+              </span>
+            </div>
+            
+            <div class="space-y-2.5 text-xs md:text-sm font-medium">
+              <div class="flex justify-between text-slate-500 dark:text-slate-400">
+                <span>Requests</span>
+                <span class="text-slate-900 dark:text-slate-100 font-semibold">${pRequests}</span>
+              </div>
+              <div class="flex justify-between text-slate-500 dark:text-slate-400">
+                <span>Cache Hits (Exact/Fuzzy)</span>
+                <span class="text-slate-900 dark:text-slate-100 font-semibold">${pStats.exactCacheHits || 0} / ${pStats.fuzzyCacheHits || 0}</span>
+              </div>
+              <div class="flex justify-between text-slate-500 dark:text-slate-400">
+                <span>Coalesced Requests</span>
+                <span class="text-slate-900 dark:text-slate-100 font-semibold">${pStats.dedupRequests || 0}</span>
+              </div>
+              
+              <!-- Mini progress bar -->
+              <div class="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div class="bg-indigo-500 h-1.5 rounded-full" style="width: ${pRatio}%"></div>
+              </div>
+              
+              <div class="flex justify-between items-center pt-2 text-slate-900 dark:text-white font-bold border-t border-slate-200/40 dark:border-slate-800/40">
+                <span>Est. Savings</span>
+                <span class="text-emerald-500">$${(pStats.dollarsSaved || 0).toFixed(4)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+        providersContainer.insertAdjacentHTML('beforeend', cardHtml);
+      }
+    }
+  </script>
+
+  <script>
+    // 4. Chart.js rendering
+    let myChart = null;
+
+    function renderChart() {
+      const isDark = document.documentElement.classList.contains('dark');
+      const chartWrapper = document.getElementById('chart-wrapper');
+      
+      // Clear previous canvas
+      chartWrapper.innerHTML = '<canvas id="costChart"></canvas>';
+      
+      const stats = window.__STATS__ || {};
+      const dailyRollups = stats.dailyRollups || {};
+      
+      const dates = new Set();
+      for (const pStats of Object.values(dailyRollups)) {
+        for (const date of Object.keys(pStats)) {
+          dates.add(date);
+        }
+      }
+      const sortedDates = Array.from(dates).sort();
+      
+      if (sortedDates.length === 0) {
+        chartWrapper.innerHTML = `
+          <div class="absolute inset-0 flex flex-col items-center justify-center text-sm text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+            <i data-lucide="line-chart" class="w-8 h-8 mb-2 text-slate-500"></i>
+            <span>No daily performance details saved yet.</span>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      const chartLabels = sortedDates.map(d => d.substring(5)); // MM-DD
+      const chartData = sortedDates.map(date => {
+        let totalCost = 0;
+        for (const providerId of Object.keys(dailyRollups)) {
+          if (dailyRollups[providerId][date]) {
+            totalCost += dailyRollups[providerId][date].cost;
+          }
+        }
+        return parseFloat(totalCost.toFixed(4));
+      });
+
+      const ctx = document.getElementById('costChart').getContext('2d');
+      
+      const primaryColor = isDark ? 'rgb(99, 102, 241)' : 'rgb(79, 70, 229)'; // indigo-500 / indigo-600
+      const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
+      const textColor = isDark ? '#94a3b8' : '#64748b';
+
+      const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+      gradient.addColorStop(0, isDark ? 'rgba(99, 102, 241, 0.25)' : 'rgba(79, 70, 229, 0.18)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartLabels,
+          datasets: [{
+            label: 'Cost Saved',
+            data: chartData,
+            borderColor: primaryColor,
+            backgroundColor: gradient,
+            borderWidth: 3.5,
+            pointBackgroundColor: primaryColor,
+            pointBorderColor: isDark ? '#09090b' : '#ffffff',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            fill: true,
+            tension: 0.35
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: isDark ? '#0f172a' : '#ffffff',
+              titleColor: isDark ? '#ffffff' : '#0f172a',
+              bodyColor: isDark ? '#f8fafc' : '#334155',
+              borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+              borderWidth: 1,
+              titleFont: { family: 'Inter', weight: 'bold' },
+              bodyFont: { family: 'Inter' },
+              padding: 12,
+              cornerRadius: 12,
+              displayColors: false,
+              callbacks: {
+                label: function(context) {
+                  return 'Saved: $' + context.parsed.y.toFixed(4);
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: textColor, font: { size: 10 } }
+            },
+            y: {
+              grid: { color: gridColor },
+              ticks: {
+                color: textColor,
+                font: { size: 10 },
+                callback: function(value) { return '$' + value; }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    renderChart();
+  </script>
+
+  <script>
+    // Initialize icons
+    lucide.createIcons();
+  </script>
+</body>
+</html>
