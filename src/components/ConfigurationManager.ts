@@ -254,7 +254,9 @@ export class ConfigurationManager implements IConfigurationManager {
     
     if (process.env.RELAY_PROVIDER) {
       const pType = process.env.RELAY_PROVIDER.toLowerCase();
-      config.provider = { type: pType };
+      if (!config.provider || config.provider.type !== pType) {
+        config.provider = { type: pType };
+      }
       
       if (pType === 'openai') {
         if (process.env.OPENAI_API_KEY) config.provider.apiKey = process.env.OPENAI_API_KEY;

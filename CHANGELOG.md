@@ -4,10 +4,17 @@
 
 ### Added
 - **Docker Support**: Added multi-stage `Dockerfile` and `docker-compose.yml` for zero-install, containerized deployments. Persists OAuth device flow tokens across restarts.
+- **Environment Overrides**: Added full environment variable override support in `ConfigurationManager` (e.g., `RELAY_PROVIDER`, `RELAY_PORT`, `RELAY_HOST`).
+- **Encrypted Cache Persistence**: Implemented AES-256-GCM file-based persistence for `CacheManager` to align with `SECURITY.md` compliance standards.
 - **Native Gemini Format**: Integrated support for Google's Gemini API request (`contents` / `generationConfig`) and response (`candidates` / `usageMetadata`) formats, translating them to and from canonical types.
 - **In-flight Stream Translation**: Formats streaming chunks from OpenAI or Anthropic provider protocols directly into Gemini's stream format in flight.
 - **CI/CD Workflow**: Added GitHub Actions workflow (`docker-publish.yml`) to automatically build, test, and publish Docker images to GHCR on tags.
 - **Makefile Orchestration**: Added a GNU `Makefile` wrapping common workflows (`install`, `build`, `test`, `typecheck`, `docker-build`, `docker-up`, `docker-down`, `clean`) to simplify orchestration.
+- **Discoverability Assets**: Generated new architecture diagrams and performance benchmark tables for the README, and updated GitHub topics for enhanced search intent alignment.
+
+### Fixed
+- **Anthropic Tool Calling**: Fixed stream chunk translations related to Anthropic `tool_use` and `tool_result` roles, ensuring seamless agent workflow execution.
+- **Dynamic Pricing Initialization**: Fixed pricing bugs where dynamic fetching caused race conditions during proxy hot paths.
 
 ### Verified
 - **Claude Code**: Verified and documented integration using `ANTHROPIC_BASE_URL` with pay-as-you-go key billing.
