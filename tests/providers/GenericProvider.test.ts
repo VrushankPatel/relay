@@ -41,4 +41,18 @@ describe('GenericProvider', () => {
     const p2 = new GenericProvider({ type: 'generic', baseUrl: 'http://test/v1/chat/completions' });
     expect(p2.getEndpointUrl()).toBe('http://test/v1/chat/completions');
   });
+
+  it('assembleStream processes SSE chunks correctly', () => {
+    const provider = new GenericProvider({ type: 'generic', baseUrl: 'http://test' });
+    const chunks = [
+      'data: {"id":"chatcmpl-123","model":"generic-model","created":12345,"choices":[{"index":0,"delta":{"content":"Hello "},"finish_reason":null}]}\n',
+      'data: {"id":"chatcmpl-123","model":"generic-model","created":12345,"choices":[{"index":0,"delta":{"content":"world!"},"finish_reason":"stop"}]}\n',
+      'data: [DONE]\n'
+    ];
+    const assembled = provider.assembleStream(chunks);
+    expect(assembled.id).toBe('chatcmpl-123');
+    expect(assembled.model).toBe('generic-model');
+    expect(assembled.choices[0].message.content).toBe('Hello world!');
+    expect(assembled.choices[0].finish_reason).toBe('stop');
+  });
 });
