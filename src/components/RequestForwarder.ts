@@ -200,8 +200,15 @@ export class RequestForwarder implements IRequestForwarder {
           this.logger.info('Circuit breaker closed - API recovered');
         }
 
-        for await (const chunk of upstreamRes) {
-          yield chunk.toString();
+        try {
+          for await (const chunk of upstreamRes) {
+            yield chunk.toString();
+          }
+        } finally {
+          upstreamRes.destroy();
+          if (upstreamReq) {
+            upstreamReq.destroy();
+          }
         }
         return;
 

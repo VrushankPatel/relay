@@ -395,6 +395,7 @@ async function main(): Promise<void> {
           if (chatReq.stream) {
             const generator = async function* () {
               const chunks: string[] = [];
+              let completed = false;
               try {
                 const stream = requestForwarder.forwardStream(chatReq, provider);
                 for await (const chunk of stream) {
@@ -409,11 +410,22 @@ async function main(): Promise<void> {
                   }
                   yield clientChunk;
                 }
+                completed = true;
+              } catch (forwardError: any) {
                 if (!shouldBypass) {
-                  dedupManager.completeStream(contextHash);
+                  dedupManager.failRequest(contextHash, forwardError);
+                }
+                throw forwardError;
+              } finally {
+                if (!shouldBypass) {
+                  if (completed) {
+                    dedupManager.completeStream(contextHash);
+                  } else {
+                    dedupManager.failRequest(contextHash, new Error('Client disconnected or stream aborted'));
+                  }
                 }
 
-                if (provider.assembleStream) {
+                if (provider.assembleStream && chunks.length > 0) {
                   try {
                     const internalResponse = provider.assembleStream(chunks);
                     const entry = {
@@ -426,30 +438,21 @@ async function main(): Promise<void> {
                       inputTokens: internalResponse.usage?.prompt_tokens || 0,
                       outputTokens: internalResponse.usage?.completion_tokens || 0,
                     };
-                    if (!shouldBypass) {
+                    if (!shouldBypass && completed) {
                       await cacheManager.store(contextHash, entry);
                       if (config.fuzzyCache?.enabled) {
                         fuzzyGuard.store(normalized, contextHash, entry);
                       }
                     }
+                    
+                    const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
+                    const resTokens = tokenAnalyzer.countResponseTokens(internalResponse);
+                    const cost = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
+                    statsStore.recordCacheMiss(provider.id, cost, true);
                   } catch (e) {
-                    log.warn({ error: e }, 'Cache stream assembly/store failed');
-                  }
-                  if (chunks.length > 0) {
-                    try {
-                      const internalResponse = provider.assembleStream(chunks);
-                      const reqTokens = tokenAnalyzer.countRequestTokens(chatReq);
-                      const resTokens = tokenAnalyzer.countResponseTokens(internalResponse);
-                      const cost = calculateCost(chatReq.model, reqTokens, resTokens, pricingMap);
-                      statsStore.recordCacheMiss(provider.id, cost, true);
-                    } catch (e) {
-                      log.warn({ error: e }, 'Failed to record stream cache miss stats');
-                    }
+                    log.warn({ err: e }, 'Telemetry or cache save in stream finally block failed');
                   }
                 }
-              } catch (forwardError: any) {
-                dedupManager.failRequest(contextHash, forwardError);
-                throw forwardError;
               }
             };
             return sendResponse(200, generator(), false, true);
@@ -494,7 +497,7 @@ async function main(): Promise<void> {
         }
 
       } catch (error: any) {
-        log.error({ error }, 'Error processing request');
+        log.error({ err: error }, 'Error processing request');
         return {
           statusCode: error.statusCode || 500,
           headers: { 'Content-Type': 'application/json' },

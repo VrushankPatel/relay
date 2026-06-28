@@ -145,7 +145,7 @@ export class APIGatewayImpl implements APIGateway {
     return new Promise((resolve, reject) => {
       const handler = (req: http.IncomingMessage, res: http.ServerResponse) => {
         this.handleHttpRequest(req, res).catch((error) => {
-          getLogger().error({ error, url: req.url }, 'Unhandled error in request handler');
+          getLogger().error({ err: error, url: req.url }, 'Unhandled error in request handler');
           if (!res.headersSent) {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
@@ -402,18 +402,33 @@ export class APIGatewayImpl implements APIGateway {
     return headers;
   }
 
-  /**
-   * Send HTTP response to the client.
-   */
   private async sendResponse(res: http.ServerResponse, response: HTTPResponse): Promise<void> {
     res.writeHead(response.statusCode, response.headers);
     if (typeof response.body === 'string') {
       res.end(response.body);
     } else {
-      for await (const chunk of response.body) {
-        res.write(chunk);
+      let closed = false;
+      const onCleanup = () => {
+        closed = true;
+      };
+      res.on('close', onCleanup);
+      res.on('finish', onCleanup);
+
+      try {
+        for await (const chunk of response.body) {
+          if (closed) break;
+          res.write(chunk);
+        }
+      } finally {
+        res.off('close', onCleanup);
+        res.off('finish', onCleanup);
+        res.end();
+        if (response.body && typeof (response.body as any).return === 'function') {
+          try {
+            await (response.body as any).return();
+          } catch (e) {}
+        }
       }
-      res.end();
     }
   }
 
