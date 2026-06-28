@@ -149,7 +149,7 @@ function createBaseLogger(config: LoggerConfig = {}): pino.Logger {
     base: {
       pid: process.pid,
       hostname: process.env.HOSTNAME || 'unknown',
-      service: config.name || 'copilot-token-optimizer-proxy',
+      service: config.name || 'relay',
     },
   };
 

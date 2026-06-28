@@ -71,5 +71,6 @@ logging:
 # ── Security ──
 security:
   # API key that clients must send to authenticate with Relay
-  # apiKey: your-relay-api-key
-  encryptCache: false
+  # Encrypt cache at rest using AES-256-GCM (Recommended: true for security)
+  # Negligible CPU cost but prevents sensitive code leaks if disk is compromised.
+  encryptCache: true

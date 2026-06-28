@@ -15,12 +15,12 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const KEY_ITERATIONS = 100000;
 const KEY_LENGTH = 32;
-const DEFAULT_SALT = 'copilot-proxy-salt';
+const DEFAULT_SALT = 'relay-proxy-salt';
 
 /**
  * Derive a 256-bit key from a passphrase using PBKDF2.
  * @param secret - The passphrase/secret to derive from
- * @param salt - Optional salt (defaults to 'copilot-proxy-salt' for backward compatibility)
+ * @param salt - Optional salt (defaults to 'relay-proxy-salt' for backward compatibility)
  * @returns 32-byte key buffer
  */
 export function deriveKey(secret: string, salt: string = DEFAULT_SALT): Buffer {

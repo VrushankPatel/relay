@@ -54,10 +54,11 @@ export class CopilotProvider implements IProvider {
   }
 
   async getModelList(): Promise<ModelInfo[]> {
+    const today = new Date().toISOString().split('T')[0];
     return [
-      { id: 'gpt-4o', name: 'GPT-4o', owned_by: 'github', input_cost_per_million: null, output_cost_per_million: null },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', owned_by: 'github', input_cost_per_million: null, output_cost_per_million: null },
-      { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', owned_by: 'github', input_cost_per_million: null, output_cost_per_million: null }
+      { id: 'gpt-4o', name: 'GPT-4o', owned_by: 'github', input_cost_per_million: null, output_cost_per_million: null, pricingLastVerified: today },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', owned_by: 'github', input_cost_per_million: null, output_cost_per_million: null, pricingLastVerified: today },
+      { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', owned_by: 'github', input_cost_per_million: null, output_cost_per_million: null, pricingLastVerified: today }
     ];
   }
 

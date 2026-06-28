@@ -1,5 +1,6 @@
 import http from 'http';
 import { parseArgs } from 'util';
+import { OpenAIProvider } from '../src/providers/OpenAIProvider.js';
 
 const args = parseArgs({
   options: {
@@ -17,14 +18,21 @@ const AUTH = args.values.auth;
 
 const PROMPT = `Write a comprehensive, production-ready implementation of a concurrent unbounded queue in Python using asyncio, including comprehensive docstrings and unit tests with pytest.`;
 
-// Known pricing per 1M tokens (from our types.ts)
-const PRICING: Record<string, { input: number, output: number }> = {
-  'gpt-4o': { input: 5, output: 15 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-3.5-turbo': { input: 0.50, output: 1.50 },
-  'claude-sonnet-4-20250514': { input: 3, output: 15 },
-  'claude-3-5-haiku-20241022': { input: 0.25, output: 1.25 }
-};
+let PRICING: Record<string, { input: number, output: number }> = {};
+
+async function loadPricing() {
+  const provider = new OpenAIProvider({ type: 'openai', apiKey: process.env.OPENAI_API_KEY || 'dummy' });
+  try {
+    const models = await provider.getModelList();
+    for (const model of models) {
+      if (model.input_cost_per_million !== null && model.output_cost_per_million !== null) {
+        PRICING[model.id] = { input: model.input_cost_per_million, output: model.output_cost_per_million };
+      }
+    }
+  } catch (e) {
+    console.warn('Could not load pricing from provider', e);
+  }
+}
 
 async function sendRequest(isWarm: boolean): Promise<{ latency: number, promptTokens: number, completionTokens: number, cacheHit: boolean }> {
   return new Promise((resolve, reject) => {
@@ -80,6 +88,7 @@ function calculateCost(model: string, inputTokens: number, outputTokens: number)
 
 async function main() {
   console.log(`🚀 Relay Benchmark Script`);
+  await loadPricing();
   console.log(`Target: http://${PROXY_HOST}:${PROXY_PORT} | Model: ${MODEL}`);
   console.log(`Pricing known: ${!!PRICING[MODEL as string]}`);
   console.log(`-----------------------------------------------------`);
