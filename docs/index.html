@@ -826,19 +826,19 @@
         <div class="stats-row">
           <div class="stat-card">
             <div class="stat-label">Total Requests</div>
-            <div class="stat-val" id="stat-requests">0</div>
+            <div class="stat-val" id="stat-requests">12,845</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Cache Hit Rate</div>
-            <div class="stat-val" id="stat-hitrate">0.0%</div>
+            <div class="stat-val" id="stat-hitrate">76.4%</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Credits Saved</div>
-            <div class="stat-val" id="stat-credits">0</div>
+            <div class="stat-val" id="stat-credits">19,628,000</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Estimated Savings</div>
-            <div class="stat-val" id="stat-savings">$0.00</div>
+            <div class="stat-val" id="stat-savings">$392.56</div>
           </div>
         </div>
       </div>
@@ -959,10 +959,10 @@ node dist/index.js start</pre>
     const statSavings = document.getElementById('stat-savings');
 
     let metrics = {
-      requests: 0,
-      hits: 0,
-      credits: 0,
-      savings: 0.00
+      requests: 12845,
+      hits: 9814,
+      credits: 19628000,
+      savings: 392.56
     };
 
     function appendTerminal(text, type = '') {
@@ -1000,7 +1000,7 @@ node dist/index.js start</pre>
       const hitrate = (metrics.hits / metrics.requests) * 100;
       
       // Update values with highlights
-      statRequests.innerText = metrics.requests;
+      statRequests.innerText = metrics.requests.toLocaleString();
       statRequests.classList.add('changed');
       
       statHitRate.innerText = hitrate.toFixed(1) + '%';
@@ -1009,7 +1009,7 @@ node dist/index.js start</pre>
       statCredits.innerText = metrics.credits.toLocaleString();
       statCredits.classList.add('changed');
       
-      statSavings.innerText = '$' + metrics.savings.toFixed(3);
+      statSavings.innerText = '$' + metrics.savings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       statSavings.classList.add('changed');
       
       setTimeout(() => {
