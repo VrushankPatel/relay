@@ -1,5 +1,5 @@
 {
-  "name": "relay",
+  "name": "relay-llm-proxy",
   "version": "2.2.0",
   "description": "Provider agnostic LLM caching and deduplication proxy for OpenAI, Anthropic, Gemini, and Copilot Business/Enterprise",
   "main": "dist/index.js",
@@ -35,7 +35,14 @@
   ],
   "author": "",
   "license": "MIT",
-  "bin": "dist/index.js",
+  "bin": {
+    "relay": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "config.example.yaml"
+  ],
   "pkg": {
     "assets": [
       "dist/**/*"
