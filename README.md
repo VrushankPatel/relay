@@ -88,20 +88,34 @@ Instead of pulling the mutable `latest` tag, pull by the exact SHA-256 digest li
 docker pull ghcr.io/vrushankpatel/relay@sha256:<digest>
 ```
 
-### Installation (Node)
+### 1. Homebrew (macOS & Linux)
 
-If you prefer running natively without Docker, you can configure and build the application.
+The easiest way to install Relay is via Homebrew:
 
-1. Install and build Relay:
-   
-   Using Make:
+```bash
+# Tap the repository
+brew tap vrushankpatel/relay
+
+# Install Relay CLI
+brew install relay
+```
+
+### 2. NPM Global Package
+
+Alternatively, install Relay globally via npm:
+
+```bash
+npm install -g relay-llm-proxy
+```
+
+### 3. Build from Source
+
+If you prefer building manually from source:
+
+1. Clone and compile Relay:
    ```bash
-   make install
-   make build
-   ```
-   
-   Or using npm:
-   ```bash
+   git clone https://github.com/VrushankPatel/relay.git
+   cd relay
    npm install
    npm run build
    ```

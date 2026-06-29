@@ -1,15 +1,32 @@
 # Using Relay
 
-## Installation
+### 1. Homebrew (macOS & Linux)
 
-Using Make:
+The easiest way to install the Relay CLI is via Homebrew:
+
 ```bash
-make install
-make build
+# Tap the repository
+brew tap vrushankpatel/relay
+
+# Install the Relay CLI
+brew install relay
 ```
 
-Or using npm:
+### 2. NPM Global Package
+
+You can also install Relay globally via npm:
+
 ```bash
+npm install -g relay-llm-proxy
+```
+
+### 3. Build from Source
+
+If you prefer building manually:
+
+```bash
+git clone https://github.com/VrushankPatel/relay.git
+cd relay
 npm install
 npm run build
 ```
