@@ -8,6 +8,9 @@ The easiest way to install the Relay CLI is via Homebrew:
 # Tap the repository
 brew tap vrushankpatel/relay
 
+# (If prompted by Homebrew security check) Trust the tap
+brew trust vrushankpatel/relay
+
 # Install the Relay CLI
 brew install relay
 ```
