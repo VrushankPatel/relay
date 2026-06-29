@@ -54,6 +54,15 @@ The fastest way to get started is with Docker Compose.
    ```
 The proxy will be available at `http://localhost:8080`.
 
+### Easy Setup for OpenCode & Ollama
+
+If you are using **OpenCode** with a local or cloud **Ollama** model, you can automatically configure both Relay's environment and your global OpenCode settings using our setup helper:
+
+```bash
+npm run setup:opencode
+```
+This script will locate your global OpenCode configuration file (e.g., `~/.config/opencode/opencode.jsonc`), configure it to point to Relay, whitelist your models, and initialize a local `.env` file pointing to Ollama. After running the script, simply start the proxy via Docker (`docker compose up -d`) and launch OpenCode.
+
 **Note:** The current Docker image includes all `v4` features, including robust encrypted cache persistence (AES-256-GCM) and streaming chunk multicast deduplication. The final image size is extremely lightweight (`~73MB` content size) and is based on `node:20-alpine`.
 
 ## Installation
@@ -109,6 +118,12 @@ If you prefer running natively without Docker, you can configure and build the a
    ```bash
    npm start
    ```
+
+## Live Dashboard
+
+Relay includes a built-in, real-time analytics dashboard in both dark and light modes. It shows your cumulative credit savings, exact and fuzzy cache hit rates, concurrent deduplication statistics, and detailed provider breakdown telemetry:
+
+![Relay Dashboard Preview](./docs/assets/dashboard_preview.png)
 
 ## Architecture
 

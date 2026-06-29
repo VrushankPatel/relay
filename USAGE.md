@@ -121,8 +121,24 @@ claude
 
 ### 2. OpenCode
 
-OpenCode accepts any custom OpenAI-compatible endpoint. You can configure it via your global or project `settings.json` config:
+OpenCode accepts any custom OpenAI-compatible endpoint. It can be integrated using either the VS Code extension or the standalone CLI tool.
 
+#### Automated Setup (Ollama & Standalone CLI)
+
+If you are using the OpenCode Standalone CLI with local or cloud Ollama models, you can configure both Relay and OpenCode globally with one simple command:
+
+```bash
+npm run setup:opencode
+```
+
+This automated helper script locates your global OpenCode configuration (`~/.config/opencode/opencode.jsonc`), configures the `ollama` provider to point to Relay, whitelists the required models, and sets up your local `.env` configuration file pointing to Ollama. After running the script, simply:
+1. Rebuild/start the Relay Docker proxy: `docker compose up -d --build`
+2. Start OpenCode with your model: `ollama launch opencode --model glm-4.7:cloud`
+
+#### Manual Configuration
+
+**A. For the OpenCode VS Code Extension:**
+Add the following keys to your global or project-level VS Code `settings.json`:
 ```json
 {
   "opencode.openai.baseURL": "http://localhost:8080/v1",
@@ -131,7 +147,29 @@ OpenCode accepts any custom OpenAI-compatible endpoint. You can configure it via
 }
 ```
 
-Repeat requests in OpenCode will serve from Relay's exact or fuzzy cache, reducing API credit charges.
+**B. For the Standalone CLI tool:**
+Add the following keys to `/Users/vrushankpatel/.config/opencode/opencode.jsonc`:
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (via Relay Proxy)",
+      "options": {
+        "baseURL": "http://localhost:8080/v1"
+      },
+      "models": {
+        "glm-4.7:cloud": {
+          "name": "glm-4.7:cloud"
+        }
+      }
+    }
+  }
+}
+```
+
+Once configured, repeat requests in OpenCode will serve from Relay's exact or fuzzy cache, reducing API credit charges.
 
 ---
 
