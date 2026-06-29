@@ -894,22 +894,22 @@
             <div class="step-item">
               <div class="step-num">1</div>
               <div class="step-content">
-                <h4>Install Dependencies</h4>
-                <p>Run npm install and build the distribution packages.</p>
+                <h4>Install Relay CLI</h4>
+                <p>Use Homebrew or global npm registry to install the CLI command.</p>
               </div>
             </div>
             <div class="step-item">
               <div class="step-num">2</div>
               <div class="step-content">
                 <h4>Run Sanity Diagnostics</h4>
-                <p>Verify system setup using the built-in doctor command.</p>
+                <p>Verify configuration and system setup using <code>relay doctor</code>.</p>
               </div>
             </div>
             <div class="step-item">
               <div class="step-num">3</div>
               <div class="step-content">
                 <h4>Launch Relay Server</h4>
-                <p>Launch the server in the foreground, or as a background daemon.</p>
+                <p>Launch the server inline or in the background via <code>relay start</code>.</p>
               </div>
             </div>
           </div>
@@ -920,16 +920,18 @@
             <span class="code-title">Terminal</span>
             <button class="copy-btn" id="copy-btn">Copy</button>
           </div>
-          <pre id="code-block">git clone https://github.com/VrushankPatel/relay.git
-cd relay
-npm install
-npm run build
+          <pre id="code-block"># Option A: Install via Homebrew (macOS & Linux)
+brew tap vrushankpatel/relay
+brew install relay
 
-# Run diagnosis check
-node dist/index.js doctor
+# Option B: Install via NPM registry
+npm install -g relay-llm-proxy
 
-# Start Relay default server
-node dist/index.js start</pre>
+# Verify environment & config
+relay doctor
+
+# Launch Relay daemon
+relay start -d</pre>
         </div>
       </div>
     </section>
