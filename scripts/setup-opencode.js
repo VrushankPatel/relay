@@ -73,7 +73,7 @@ async function setup() {
   if (!config.provider.ollama.options) {
     config.provider.ollama.options = {};
   }
-  config.provider.ollama.options.baseURL = 'http://localhost:8080/v1';
+  config.provider.ollama.options.baseURL = 'http://localhost:9879/v1';
 
   // Ensure glm-4.7:cloud model is whitelisted under the provider
   if (!config.provider.ollama.models) {
@@ -115,7 +115,7 @@ async function setup() {
   envContent = setEnvVar(envContent, 'RELAY_PROVIDER', 'generic');
   envContent = setEnvVar(envContent, 'GENERIC_BASE_URL', 'http://host.docker.internal:11434');
   envContent = setEnvVar(envContent, 'GENERIC_API_KEY', 'ollama');
-  envContent = setEnvVar(envContent, 'RELAY_PORT', '8080');
+  envContent = setEnvVar(envContent, 'RELAY_PORT', '9879');
 
   try {
     fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf-8');
@@ -134,7 +134,7 @@ async function setup() {
   console.log('  2. Run OpenCode with your Ollama model directly:');
   console.log('     \x1b[33mollama launch opencode --model glm-4.7:cloud\x1b[0m');
   console.log('  3. Open your browser and monitor real-time traffic:');
-  console.log('     \x1b[33mhttp://localhost:8080/dashboard\x1b[0m');
+  console.log('     \x1b[33mhttp://localhost:9879/dashboard\x1b[0m');
   console.log('\x1b[36m==================================================\x1b[0m\n');
 }
 

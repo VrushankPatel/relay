@@ -92,14 +92,14 @@ logging:
 
     it('should use defaults when config file is missing', async () => {
       const config = await configManager.loadConfig('/nonexistent/path/config.yaml');
-      expect(config.server.port).toBe(8080);
+      expect(config.server.port).toBe(9879);
       expect(config.cache.ttlHours).toBe(24);
     });
 
     it('should use defaults when config file is empty', async () => {
       const file = writeTempYaml('');
       const config = await configManager.loadConfig(file);
-      expect(config.server.port).toBe(8080);
+      expect(config.server.port).toBe(9879);
       removeFile(file);
     });
 
@@ -145,7 +145,7 @@ server:
     it('should return no errors for valid config', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
         cache: { ttlHours: 24, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 100 },
@@ -171,7 +171,7 @@ server:
     it('should reject maxConcurrentRequests < 1', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 0, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 0, requestTimeoutMs: 5000 },
         cache: { ttlHours: 24, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 100 },
@@ -184,7 +184,7 @@ server:
     it('should reject requestTimeoutMs < 100', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 50 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 50 },
         cache: { ttlHours: 24, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 100 },
@@ -197,7 +197,7 @@ server:
     it('should reject ttlHours < 1', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
         cache: { ttlHours: 0, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 100 },
@@ -210,7 +210,7 @@ server:
     it('should reject maxEntries < 1', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
         cache: { ttlHours: 24, maxEntries: 0, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 100 },
@@ -223,7 +223,7 @@ server:
     it('should reject warningThresholdPercent out of range', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
         cache: { ttlHours: 24, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 150 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 100 },
@@ -236,7 +236,7 @@ server:
     it('should reject threshold out of range', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
         cache: { ttlHours: 24, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: -1, maxSearchEntries: 100 },
@@ -249,7 +249,7 @@ server:
     it('should reject maxSearchEntries < 1', () => {
       const cm = new ConfigurationManager();
       const errors = cm.validateConfig({
-        server: { port: 8080, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
+        server: { port: 9879, host: '0.0.0.0', maxConcurrentRequests: 100, requestTimeoutMs: 5000 },
         cache: { ttlHours: 24, maxEntries: 10000, compressionEnabled: true },
         tokens: { budgetPerUserPerDay: undefined, warningThresholdPercent: 90 },
         similarity: { enabled: true, threshold: 85, maxSearchEntries: 0 },
@@ -263,7 +263,7 @@ server:
   describe('getCurrentConfig', () => {
     it('should return the current config', () => {
       const config = configManager.getCurrentConfig();
-      expect(config.server.port).toBe(8080);
+      expect(config.server.port).toBe(9879);
     });
   });
 });

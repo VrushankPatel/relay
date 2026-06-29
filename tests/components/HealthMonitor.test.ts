@@ -100,7 +100,7 @@ describe('HealthMonitor', () => {
   describe('getDiagnostics', () => {
     it('should include version and uptime', () => {
       const diag = monitor.getDiagnostics(sampleConfig, sampleCacheStats, samplePoolStats, sampleMetrics);
-      expect(diag.version).toBe('1.0.0');
+      expect(diag.version).toBe('2.2.0');
       expect(diag.uptime).toBeGreaterThanOrEqual(0);
     });
 

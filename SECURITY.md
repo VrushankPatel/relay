@@ -35,7 +35,7 @@ To prevent credential leaks and unauthorized access, the operational dashboard i
 ### Verifying Your Deployment
 
 To verify your deployment is secure:
-1. Try accessing `http://localhost:8080/dashboard` in a browser without any credentials. It must return a `401 Unauthorized` response.
+1. Try accessing `http://localhost:9879/dashboard` in a browser without any credentials. It must return a `401 Unauthorized` response.
 2. Verify that `~/.relay/admin_api_key` is present and has restricted file permissions (only readable by the owner).
 3. If running in production, explicitly define `security.apiKey` in `config.yaml` to override the auto-generated key with your organization's managed secret.
 

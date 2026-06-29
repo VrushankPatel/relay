@@ -52,7 +52,7 @@ The fastest way to get started is with Docker Compose.
    ```bash
    docker compose up -d
    ```
-The proxy will be available at `http://localhost:8080`.
+The proxy will be available at `http://localhost:9879`.
 
 ### Easy Setup for OpenCode & Ollama
 

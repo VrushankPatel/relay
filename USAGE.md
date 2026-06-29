@@ -48,7 +48,7 @@ You can configure your chosen upstream LLM provider either in your `config.yaml`
 When running without a config file (or to override it), the following environment variables are supported:
 
 - `RELAY_PROVIDER`: The active provider (`openai`, `anthropic`, `copilot`, `generic`).
-- `RELAY_PORT`: The port Relay will listen on (default: `8080`).
+- `RELAY_PORT`: The port Relay will listen on (default: `9879`).
 - `RELAY_HOST`: The interface to bind to (default: `0.0.0.0`).
 - `OPENAI_API_KEY`: API key for OpenAI provider.
 - `ANTHROPIC_API_KEY`: API key for Anthropic provider.
@@ -96,7 +96,7 @@ provider:
 
 ## Client Configuration & Tool Integration
 
-To redirect standard client tools through Relay, you configure them to point to Relay's server address (default `http://localhost:8080`).
+To redirect standard client tools through Relay, you configure them to point to Relay's server address (default `http://localhost:9879`).
 
 ### 1. Claude Code CLI
 
@@ -106,7 +106,7 @@ To start Claude Code through Relay (configured with the Anthropic provider backe
 
 ```bash
 # Point Claude Code to Relay's API Gateway
-export ANTHROPIC_BASE_URL="http://localhost:8080/v1"
+export ANTHROPIC_BASE_URL="http://localhost:9879/v1"
 # Set your Relay API key (if configured in security.apiKey), or use dummy
 export ANTHROPIC_AUTH_TOKEN="your-relay-api-key"
 
@@ -141,7 +141,7 @@ This automated helper script locates your global OpenCode configuration (`~/.con
 Add the following keys to your global or project-level VS Code `settings.json`:
 ```json
 {
-  "opencode.openai.baseURL": "http://localhost:8080/v1",
+  "opencode.openai.baseURL": "http://localhost:9879/v1",
   "opencode.openai.apiKey": "your-relay-api-key",
   "opencode.openai.model": "gpt-4o"
 }
@@ -157,7 +157,7 @@ Add the following keys to `/Users/vrushankpatel/.config/opencode/opencode.jsonc`
       "npm": "@ai-sdk/openai-compatible",
       "name": "Ollama (via Relay Proxy)",
       "options": {
-        "baseURL": "http://localhost:8080/v1"
+        "baseURL": "http://localhost:9879/v1"
       },
       "models": {
         "glm-4.7:cloud": {
@@ -178,7 +178,7 @@ Once configured, repeat requests in OpenCode will serve from Relay's exact or fu
 To configure Cline to use Relay:
 1. Open Cline Settings.
 2. Under **Provider**, select **OpenAI Compatible**.
-3. Set **Base URL** to `http://localhost:8080/v1`.
+3. Set **Base URL** to `http://localhost:9879/v1`.
 4. Enter your Relay API key (or `dummy`).
 5. Choose your target model ID (e.g., `gpt-4o` or `claude-3-5-sonnet`).
 
@@ -190,7 +190,7 @@ Aider is BYOK (Bring Your Own Key) and model-agnostic. Route Aider through Relay
 
 ```bash
 # Redirect Aider through the proxy
-export OPENAI_API_BASE="http://localhost:8080/v1"
+export OPENAI_API_BASE="http://localhost:9879/v1"
 export OPENAI_API_KEY="your-relay-api-key"
 
 # Start Aider
@@ -205,7 +205,7 @@ Relay features native translation support for Google's Gemini API wire format.
 
 ```bash
 # Redirect Gemini CLI to Relay
-export GEMINI_BASE_URL="http://localhost:8080"
+export GEMINI_BASE_URL="http://localhost:9879"
 
 # Execute commands using an API key
 gemini --api-key="your-relay-api-key" "Explain quantum computing in three sentences"
@@ -308,7 +308,7 @@ Relay exposes Prometheus metrics at `/metrics`. This allows you to monitor cache
 
 | Issue | Resolution |
 |-------|------------|
-| Connection Refused | Ensure Relay is running and port `8080` (or `server.port`) is free. |
+| Connection Refused | Ensure Relay is running and port `9879` (or `server.port`) is free. |
 | Cache Misses | Verify that temperature > 0 is not bypassing the cache (see `cacheBypass` config). |
 | High Latency | Check upstream API latency and ensure circuit breakers are not tripping. |
 

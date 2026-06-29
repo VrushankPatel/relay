@@ -33,9 +33,9 @@ RUN chown -R node:node /app
 USER node
 
 ENV NODE_ENV=production
-ENV RELAY_PORT=8080
+ENV RELAY_PORT=9879
 
-EXPOSE 8080
+EXPOSE 9879
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:${RELAY_PORT}/health || exit 1

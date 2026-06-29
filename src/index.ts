@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import http from 'http';
+import https from 'https';
 import { ConfigurationManager } from './components/ConfigurationManager.js';
 import { initializeLogger, createChildLogger } from './utils/logger.js';
 import { RequestProcessor } from './components/RequestProcessor.js';
@@ -303,6 +304,201 @@ async function logsCommand(): Promise<void> {
   });
 }
 
+function detectContainerEngine(): Promise<'docker' | 'podman' | null> {
+  return new Promise((resolve) => {
+    exec('docker --version', (err) => {
+      if (!err) {
+        resolve('docker');
+        return;
+      }
+      exec('podman --version', (err2) => {
+        if (!err2) {
+          resolve('podman');
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  });
+}
+
+function downloadFile(url: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(dest, { mode: 0o755 });
+    const request = https.get(url, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301) {
+        const redirectUrl = response.headers.location;
+        if (redirectUrl) {
+          downloadFile(redirectUrl, dest).then(resolve).catch(reject);
+          return;
+        }
+      }
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download binary: HTTP ${response.statusCode}`));
+        return;
+      }
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close();
+        resolve();
+      });
+    });
+    request.on('error', (err) => {
+      fs.unlink(dest, () => {});
+      reject(err);
+    });
+  });
+}
+
+function getBinaryName(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+  
+  if (platform === 'darwin') {
+    return arch === 'arm64' ? 'relay-macos-arm64' : 'relay-macos-x64';
+  } else if (platform === 'linux') {
+    return arch === 'arm64' ? 'relay-linux-arm64' : 'relay-linux-x64';
+  } else if (platform === 'win32') {
+    return 'relay-windows-x64.exe';
+  }
+  throw new Error(`Unsupported OS platform/architecture: ${platform}-${arch}`);
+}
+
+const composeContent = `
+services:
+  relay:
+    image: ghcr.io/vrushankpatel/relay:v${SERVICE_VERSION}
+    container_name: relay
+    ports:
+      - "\${RELAY_PORT:-9879}:\${RELAY_PORT:-9879}"
+    environment:
+      - RELAY_PORT=\${RELAY_PORT:-9879}
+      - CONFIG_PATH=/app/config/config.yaml
+    volumes:
+      - relay_tokens:/home/node/.relay
+      - ${os.homedir()}/.relay:/app/config
+    restart: unless-stopped
+
+volumes:
+  relay_tokens:
+    name: relay_tokens
+`;
+
+async function runCompose(engine: 'docker' | 'podman', isDaemon: boolean, isHardReset: boolean, port: number | null): Promise<void> {
+  const statsDir = path.join(os.homedir(), '.relay');
+  fs.mkdirSync(statsDir, { recursive: true });
+  
+  const configPath = path.join(statsDir, 'config.yaml');
+  if (!fs.existsSync(configPath)) {
+    if (fs.existsSync('config.example.yaml')) {
+      fs.copyFileSync('config.example.yaml', configPath);
+    } else {
+      const defaultYaml = `
+# Relay Configuration
+server:
+  port: 9879
+  host: 0.0.0.0
+provider:
+  type: openai
+cache:
+  maxEntries: 10000
+  ttlHours: 24
+security:
+  encryptCache: true
+logging:
+  level: INFO
+  prettyPrint: true
+`;
+      fs.writeFileSync(configPath, defaultYaml.trim(), 'utf-8');
+    }
+  }
+
+  const composeFile = path.join(statsDir, 'docker-compose.yml');
+  fs.writeFileSync(composeFile, composeContent.trim(), 'utf-8');
+
+  const env = { ...process.env };
+  if (port) {
+    env.RELAY_PORT = port.toString();
+  }
+
+  const binary = engine === 'docker' ? 'docker' : 'podman-compose';
+  const baseArgs = engine === 'docker' ? ['compose', '-f', composeFile] : ['-f', composeFile];
+
+  if (isHardReset) {
+    console.log(`🧹 Performing hard reset: tearing down existing volumes on ${engine}...`);
+    const downArgs = [...baseArgs, 'down', '-v', '--remove-orphans'];
+    const downChild = spawn(binary, downArgs, { env, stdio: 'inherit' });
+    await new Promise((resolve) => downChild.on('exit', resolve));
+  }
+
+  const upArgs = [...baseArgs, 'up', '--build'];
+  if (isDaemon) {
+    upArgs.push('-d');
+  }
+
+  console.log(`🚀 Launching Relay via ${engine} compose...`);
+  const upChild = spawn(binary, upArgs, { env, stdio: 'inherit' });
+  upChild.on('exit', (code) => {
+    process.exit(code || 0);
+  });
+}
+
+async function runStandalone(isDaemon: boolean, port: number | null): Promise<void> {
+  const destDir = path.join(os.homedir(), '.relay', 'bin');
+  fs.mkdirSync(destDir, { recursive: true });
+  
+  const binaryName = getBinaryName();
+  const destPath = path.join(destDir, binaryName);
+  
+  if (!fs.existsSync(destPath)) {
+    const downloadUrl = `https://github.com/VrushankPatel/relay/releases/download/v${SERVICE_VERSION}/${binaryName}`;
+    console.log(`📥 Downloading Relay standalone server binary v${SERVICE_VERSION} for ${process.platform}-${process.arch}...`);
+    console.log(`   From: ${downloadUrl}`);
+    try {
+      await downloadFile(downloadUrl, destPath);
+      fs.chmodSync(destPath, 0o755);
+      console.log('✅ Download complete.');
+    } catch (err: any) {
+      console.error(`❌ Failed to download binary: ${err.message}`);
+      console.log('Falling back to local inline execution...');
+      await startServer(port);
+      return;
+    }
+  }
+  
+  const env = { ...process.env };
+  if (port) {
+    env.RELAY_PORT = port.toString();
+  }
+  
+  const childArgs = ['start'];
+  if (isDaemon) {
+    childArgs.push('--daemon');
+  }
+  
+  const child = spawn(destPath, childArgs, {
+    env,
+    detached: isDaemon,
+    stdio: isDaemon ? 'ignore' : 'inherit'
+  });
+  
+  if (isDaemon) {
+    const pidFile = path.join(os.homedir(), '.relay', 'relay.pid');
+    if (child.pid !== undefined) {
+      fs.writeFileSync(pidFile, child.pid.toString(), 'utf-8');
+    }
+    child.unref();
+    console.log(`🚀 Relay starting in background (standalone daemon mode)...`);
+    console.log(`   PID: ${child.pid !== undefined ? child.pid : 'N/A'}`);
+    console.log(`   PID File: ${pidFile}`);
+    process.exit(0);
+  } else {
+    child.on('exit', (code) => {
+      process.exit(code || 0);
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
 
@@ -348,42 +544,87 @@ async function main(): Promise<void> {
     await logsCommand();
   } else if (!command || command === 'start') {
     const isDaemon = process.argv.includes('--daemon') || process.argv.includes('-d');
-    if (isDaemon) {
-      const statsDir = path.join(os.homedir(), '.relay');
-      fs.mkdirSync(statsDir, { recursive: true });
-      
-      const pidFile = path.join(statsDir, 'relay.pid');
-      const logFile = path.join(statsDir, 'relay.log');
-      
-      const out = fs.openSync(logFile, 'a');
-      const err = fs.openSync(logFile, 'a');
-      
-      // Filter out the daemon flags
-      const args = process.argv.slice(2).filter(arg => arg !== '--daemon' && arg !== '-d');
-      if (!args.includes('start')) {
-        args.unshift('start');
+    const isDocker = process.argv.includes('--docker');
+    const isPodman = process.argv.includes('--podman');
+    const isStandalone = process.argv.includes('--standalone');
+    const isHardReset = process.argv.includes('--hard-reset');
+
+    let overridePort: number | null = null;
+    const portIdx = process.argv.findIndex(arg => arg === '--port' || arg === '-p');
+    if (portIdx !== -1 && process.argv[portIdx + 1]) {
+      const p = parseInt(process.argv[portIdx + 1], 10);
+      if (!isNaN(p)) {
+        overridePort = p;
       }
-      
-      const isPkg = (process as any).pkg !== undefined;
-      const spawnCmd = process.argv[0];
-      const spawnArgs = isPkg ? args : [process.argv[1], ...args];
-      
-      const child = spawn(spawnCmd, spawnArgs, {
-        detached: true,
-        stdio: ['ignore', out, err]
-      });
-      
-      if (child.pid !== undefined) {
-        fs.writeFileSync(pidFile, child.pid.toString(), 'utf-8');
-      }
-      child.unref();
-      
-      console.log(`🚀 Relay starting in background (daemon mode)...`);
-      console.log(`   PID: ${child.pid !== undefined ? child.pid : 'N/A'}`);
-      console.log(`   Logs: ${logFile}`);
-      console.log(`   PID File: ${pidFile}`);
-      process.exit(0);
     }
+
+    if (isStandalone) {
+      await runStandalone(isDaemon, overridePort);
+      return;
+    }
+
+    if (isDocker || isPodman) {
+      const engine = isDocker ? 'docker' : 'podman';
+      await runCompose(engine, isDaemon, isHardReset, overridePort);
+      return;
+    }
+
+    // Default auto-detect or local source run
+    const isPackaged = (process as any).pkg !== undefined;
+    if (!isPackaged) {
+      if (isDaemon) {
+        await runStandalone(true, overridePort);
+      } else {
+        await startServer(overridePort);
+      }
+      return;
+    }
+
+    const detected = await detectContainerEngine();
+    if (detected) {
+      await runCompose(detected, isDaemon, isHardReset, overridePort);
+    } else {
+      await runStandalone(isDaemon, overridePort);
+    }
+  } else {
+    process.stderr.write(`Unknown command: ${command}\n`);
+    process.exit(1);
+  }
+}
+
+async function startServer(overridePort: number | null): Promise<void> {
+  if (overridePort) {
+    process.env.RELAY_PORT = overridePort.toString();
+  }
+
+  const statsDir = path.join(os.homedir(), '.relay');
+  fs.mkdirSync(statsDir, { recursive: true });
+  
+  // Write default config if not exists
+  const configPath = path.join(statsDir, 'config.yaml');
+  if (!fs.existsSync(configPath) && !fs.existsSync('config.yaml')) {
+    if (fs.existsSync('config.example.yaml')) {
+      fs.copyFileSync('config.example.yaml', configPath);
+    } else {
+      const defaultYaml = `
+# Relay Configuration
+server:
+  port: 9879
+  host: 0.0.0.0
+provider:
+  type: openai
+cache:
+  maxEntries: 10000
+  ttlHours: 24
+security:
+  encryptCache: true
+logging:
+  level: INFO
+  prettyPrint: true
+`;
+      fs.writeFileSync(configPath, defaultYaml.trim(), 'utf-8');
+    }
+  }
 
     const configManager = new ConfigurationManager();
     const config = await configManager.loadConfig();
@@ -618,7 +859,6 @@ async function main(): Promise<void> {
       const pathUrl = req.request.url || '/v1/chat/completions';
       
       const sendResponse = (statusCode: number, data: unknown, cached: boolean, isStream = false): HTTPResponse => {
-        console.log('SEND RESPONSE:', { isCacheHit: cached, stream: isStream, statusCode });
         metricsCollector.recordRequest(statusCode, cached, Date.now() - startTime, 'unknown');
         return {
           statusCode: statusCode,
@@ -692,7 +932,6 @@ async function main(): Promise<void> {
         };
 
         const shouldBypass = cacheManager.shouldBypassCache(normalized);
-        console.log('DEBUG_BYPASS:', { temperature: normalized.temperature, shouldBypass });
 
         // B. Cache Lookup
         if (!shouldBypass) {
@@ -894,12 +1133,8 @@ async function main(): Promise<void> {
       process.exit(0);
     };
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-  } else {
-    process.stderr.write(`Unknown command: ${command}\n`);
-    process.exit(1);
-  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((error) => {

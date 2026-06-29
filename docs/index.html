@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relay — Provider-Agnostic LLM Caching Proxy</title>
+  <meta name="description" content="A transparent, lightning-fast caching and deduplication proxy that sits between your application and LLM APIs. Reduce costs and latency instantly.">
+  <link rel="icon" type="image/png" href="assets/dashboard_preview.png">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #0a0a12;
+      --bg-card: rgba(18, 18, 30, 0.7);
+      --bg-terminal: #07070d;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #8b5cf6;
+      --primary-glow: rgba(139, 92, 246, 0.4);
+      --secondary: #3b82f6;
+      --secondary-glow: rgba(59, 130, 246, 0.4);
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.3);
+      --border-glow: rgba(255, 255, 255, 0.08);
+      --font-outfit: 'Outfit', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-outfit);
+      overflow-x: hidden;
+      line-height: 1.5;
+    }
+
+    /* Ambient Background Glows */
+    .glow-container {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      z-index: -1;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .glow-1 {
+      position: absolute;
+      top: -10%;
+      right: 15%;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, var(--primary-glow) 0%, rgba(0,0,0,0) 70%);
+      filter: blur(80px);
+      animation: float-glow 15s infinite alternate;
+    }
+
+    .glow-2 {
+      position: absolute;
+      top: 40%;
+      left: -5%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, var(--secondary-glow) 0%, rgba(0,0,0,0) 70%);
+      filter: blur(80px);
+      animation: float-glow 20s infinite alternate-reverse;
+    }
+
+    @keyframes float-glow {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(50px, 30px) scale(1.1); }
+    }
+
+    /* Layout */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* Header */
+    header {
+      padding: 2rem 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-glow);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.5rem;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    .logo-text {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      background: linear-gradient(to right, #ffffff, #d1d5db);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-links {
+      display: flex;
+      gap: 1.5rem;
+    }
+
+    .btn {
+      padding: 0.6rem 1.2rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(139, 92, 246, 0.5);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 6rem 0 4rem 0;
+      text-align: center;
+      position: relative;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.4rem 1rem;
+      border-radius: 100px;
+      background: rgba(139, 92, 246, 0.1);
+      border: 1px solid rgba(139, 92, 246, 0.2);
+      color: #a78bfa;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .hero h1 {
+      font-size: 4rem;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.5rem;
+      background: linear-gradient(to right, #ffffff 40%, #a78bfa 70%, #60a5fa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2.75rem; }
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 700px;
+      margin: 0 auto 3rem auto;
+      font-weight: 400;
+    }
+
+    .hero-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 5rem;
+    }
+
+    /* Simulator Section */
+    .simulator-section {
+      padding: 2rem 0;
+    }
+
+    .section-title {
+      font-size: 2.25rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .section-subtitle {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-bottom: 3rem;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .simulator-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 2rem;
+      align-items: stretch;
+      margin-bottom: 5rem;
+    }
+
+    @media (max-width: 992px) {
+      .simulator-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Interactive Controller */
+    .controller-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 16px;
+      padding: 2.5rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .controller-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+
+    .controller-desc {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+
+    .interactive-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .sim-btn {
+      width: 100%;
+      padding: 1rem;
+      border-radius: 10px;
+      border: none;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.2s ease;
+      font-family: var(--font-outfit);
+      font-size: 1rem;
+    }
+
+    .sim-btn-miss {
+      background: #1e1b4b;
+      color: #c084fc;
+      border: 1px solid #581c87;
+    }
+
+    .sim-btn-miss:hover:not(:disabled) {
+      background: #3b0764;
+      box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);
+    }
+
+    .sim-btn-hit {
+      background: #064e3b;
+      color: #34d399;
+      border: 1px solid #065f46;
+    }
+
+    .sim-btn-hit:hover:not(:disabled) {
+      background: #022c22;
+      box-shadow: 0 0 15px rgba(52, 211, 153, 0.2);
+    }
+
+    .sim-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    .sim-btn-miss .btn-badge {
+      background: #581c87;
+      color: #f3e8ff;
+    }
+
+    .sim-btn-hit .btn-badge {
+      background: #065f46;
+      color: #d1fae5;
+    }
+
+    /* Terminal Console */
+    .terminal-card {
+      background: var(--bg-terminal);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #93c5fd;
+      position: relative;
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+    }
+
+    .terminal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      padding-bottom: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-red { background: #ef4444; }
+    .dot-yellow { background: #f59e0b; }
+    .dot-green { background: #10b981; }
+
+    .terminal-title {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    .terminal-body {
+      flex-grow: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .terminal-line {
+      display: flex;
+      gap: 0.5rem;
+      word-break: break-all;
+    }
+
+    .terminal-line.success {
+      color: #34d399;
+    }
+
+    .terminal-line.warning {
+      color: #fbbf24;
+    }
+
+    .terminal-line.info {
+      color: #a78bfa;
+    }
+
+    .terminal-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 15px;
+      background: #f3f4f6;
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
+
+    /* Live Stats dashboard cards */
+    .live-dashboard {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 16px;
+      padding: 2.5rem;
+      backdrop-filter: blur(12px);
+      margin-bottom: 5rem;
+    }
+
+    .dashboard-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+    }
+
+    .dashboard-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: var(--accent);
+      padding: 0.35rem 0.75rem;
+      border-radius: 100px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse-glow 1.5s infinite;
+    }
+
+    @keyframes pulse-glow {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 768px) {
+      .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 1.5rem;
+      text-align: center;
+      transition: all 0.3s ease;
+    }
+
+    .stat-card:hover {
+      border-color: rgba(139, 92, 246, 0.2);
+      background: rgba(139, 92, 246, 0.02);
+    }
+
+    .stat-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-val {
+      font-size: 2.25rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #ffffff, #d1d5db);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      transition: all 0.5s ease;
+    }
+
+    .stat-val.changed {
+      transform: scale(1.15);
+      color: #a78bfa;
+    }
+
+    /* Features Grid */
+    .features {
+      padding: 4rem 0;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      margin-bottom: 5rem;
+    }
+
+    @media (max-width: 992px) {
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 16px;
+      padding: 2rem;
+      transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-5px);
+      border-color: rgba(139, 92, 246, 0.3);
+      box-shadow: 0 10px 30px rgba(139, 92, 246, 0.05);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: rgba(139, 92, 246, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+      color: #a78bfa;
+      font-size: 1.5rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* Getting Started (Quick Code) */
+    .setup-section {
+      padding: 4rem 0;
+      background: linear-gradient(180deg, transparent, rgba(139,92,246,0.03));
+      border-radius: 30px;
+      border: 1px solid var(--border-glow);
+      padding: 4rem;
+      margin-bottom: 6rem;
+    }
+
+    .setup-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 4rem;
+      align-items: center;
+    }
+
+    @media (max-width: 992px) {
+      .setup-grid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+    }
+
+    .setup-info h2 {
+      font-size: 2.25rem;
+      font-weight: 800;
+      margin-bottom: 1.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .setup-info p {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .step-content h4 {
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .step-content p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 0;
+    }
+
+    .code-card {
+      background: var(--bg-terminal);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 1.5rem;
+      position: relative;
+    }
+
+    .code-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .code-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .copy-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: var(--text-main);
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .code-card pre {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: #93c5fd;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-glow);
+      padding: 4rem 0;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    footer p {
+      margin-bottom: 1rem;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .footer-links a:hover {
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  
+  <div class="glow-container">
+    <div class="glow-1"></div>
+    <div class="glow-2"></div>
+  </div>
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="logo-container">
+        <div class="logo-icon">R</div>
+        <div class="logo-text">Relay</div>
+      </div>
+      <div class="header-links">
+        <a href="https://github.com/VrushankPatel/relay" class="btn btn-secondary">
+          <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="badge">Production Ready Caching Proxy</div>
+      <h1>LLM Caching & Cost-Savings<br>Infrastructure for Agents</h1>
+      <p>A transparent, high-performance API proxy that sits between your code/agents and any LLM backend (OpenAI, Anthropic, Gemini, Azure, Ollama). Save up to 90% on metered token costs and drop request latencies to single-digit milliseconds.</p>
+      
+      <div class="hero-buttons">
+        <a href="#quickstart" class="btn btn-primary">Get Started Now</a>
+        <a href="#simulator" class="btn btn-secondary">Try Live Demo</a>
+      </div>
+    </section>
+
+    <!-- Live Interactive Simulator Section -->
+    <section class="simulator-section" id="simulator">
+      <h2 class="section-title">Experience Caching in Real Time</h2>
+      <p class="section-subtitle">Click the simulation buttons below to trigger actual mocked request cycles and see how Relay's caching drop request times and metrics in real time.</p>
+      
+      <div class="simulator-grid">
+        <!-- Interactive Controller -->
+        <div class="controller-card">
+          <div>
+            <h3 class="controller-title">Simulate Requests</h3>
+            <p class="controller-desc">Trigger requests to see how Relay behaves on cache misses, exact cache hits, and concurrent deduplications.</p>
+          </div>
+          
+          <div class="interactive-buttons">
+            <button class="sim-btn sim-btn-miss" id="btn-miss">
+              <span>Send Request (Cache Miss)</span>
+              <span class="btn-badge">Takes ~1.5s</span>
+            </button>
+            <button class="sim-btn sim-btn-hit" id="btn-hit" disabled>
+              <span>Send Same Request Again (Hit)</span>
+              <span class="btn-badge">Takes ~5ms</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Terminal Console -->
+        <div class="terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-dots">
+              <div class="dot dot-red"></div>
+              <div class="dot dot-yellow"></div>
+              <div class="dot dot-green"></div>
+            </div>
+            <div class="terminal-title">relay-proxy-console</div>
+          </div>
+          <div class="terminal-body" id="terminal-body">
+            <div class="terminal-line info">[info] Relay Proxy CLI initialized. Awaiting requests...</div>
+            <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cursor" id="cursor"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Dashboard Stats Cards -->
+      <div class="live-dashboard">
+        <div class="dashboard-header">
+          <h3 class="controller-title">Live Caching Metrics Dashboard</h3>
+          <span class="dashboard-badge"><span class="pulse"></span> Relay Proxy Active</span>
+        </div>
+        
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Total Requests</div>
+            <div class="stat-val" id="stat-requests">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Cache Hit Rate</div>
+            <div class="stat-val" id="stat-hitrate">0.0%</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Credits Saved</div>
+            <div class="stat-val" id="stat-credits">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Estimated Savings</div>
+            <div class="stat-val" id="stat-savings">$0.00</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Core Features Grid -->
+    <section class="features">
+      <h2 class="section-title">Designed for Agents and Production Scale</h2>
+      <p class="section-subtitle">A robust feature set built to optimize multi-agent loops and production services.</p>
+      
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🔒</div>
+          <h3>Encrypted Caching</h3>
+          <p>Optionally encrypt cache entries locally using AES-256 with automatically generated or custom runtime keys. Safeguard prompts and system credentials.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3>Deduplication Engine</h3>
+          <p>Consolidates concurrent in-flight requests requesting identical prompts. Serves all waiting duplicate request streams simultaneously from a single upstream network call.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧠</div>
+          <h3>Fuzzy Matching (Opt-in)</h3>
+          <p>Sophisticated word-level edit-distance similarity comparison. Reuses responses for minor spacing or typos differences, governed by an automated rapid-edit kill switch.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>Token Budgets</h3>
+          <p>Establish strict daily token limits per user or API key. Prevents runaway recursive agent loops from draining upstream provider credits.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🌐</div>
+          <h3>Provider Agnostic</h3>
+          <p>Acts as an OpenAI-compatible endpoint. Out-of-the-box support for OpenAI, Anthropic (Claude Code / Claude CLI), Gemini wire format, Azure OpenAI, and local Ollama/vLLM.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🐋</div>
+          <h3>Daemon CLI & Container</h3>
+          <p>Control background daemons directly via CLI commands or mount the proxy container alongside your docker application with automated configuration backups.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Getting Started Section -->
+    <section class="setup-section" id="quickstart">
+      <div class="setup-grid">
+        <div class="setup-info">
+          <h2>Getting Started in 2 Minutes</h2>
+          <p>Start saving tokens and speeding up your applications today. Follow the simple steps to launch Relay using our npm CLI.</p>
+          
+          <div class="step-list">
+            <div class="step-item">
+              <div class="step-num">1</div>
+              <div class="step-content">
+                <h4>Install Dependencies</h4>
+                <p>Run npm install and build the distribution packages.</p>
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-num">2</div>
+              <div class="step-content">
+                <h4>Run Sanity Diagnostics</h4>
+                <p>Verify system setup using the built-in doctor command.</p>
+              </div>
+            </div>
+            <div class="step-item">
+              <div class="step-num">3</div>
+              <div class="step-content">
+                <h4>Launch Relay Server</h4>
+                <p>Launch the server in the foreground, or as a background daemon.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="code-card">
+          <div class="code-card-header">
+            <span class="code-title">Terminal</span>
+            <button class="copy-btn" id="copy-btn">Copy</button>
+          </div>
+          <pre id="code-block">git clone https://github.com/VrushankPatel/relay.git
+cd relay
+npm install
+npm run build
+
+# Run diagnosis check
+node dist/index.js doctor
+
+# Start Relay default server
+node dist/index.js start</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <p>© 2026 Relay Caching Proxy Infrastructure. MIT Licensed.</p>
+      <div class="footer-links">
+        <a href="https://github.com/VrushankPatel/relay">GitHub Repository</a>
+        <a href="https://github.com/VrushankPatel/relay/blob/master/USAGE.md">Documentation</a>
+        <a href="https://github.com/VrushankPatel/relay/blob/master/COMPLIANCE.md">Compliance Notice</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // Live Dashboard Caching Simulator
+    const btnMiss = document.getElementById('btn-miss');
+    const btnHit = document.getElementById('btn-hit');
+    const terminalBody = document.getElementById('terminal-body');
+    const cursor = document.getElementById('cursor');
+    
+    // Stats elements
+    const statRequests = document.getElementById('stat-requests');
+    const statHitRate = document.getElementById('stat-hitrate');
+    const statCredits = document.getElementById('stat-credits');
+    const statSavings = document.getElementById('stat-savings');
+
+    let metrics = {
+      requests: 0,
+      hits: 0,
+      credits: 0,
+      savings: 0.00
+    };
+
+    function appendTerminal(text, type = '') {
+      // remove cursor line temp
+      const cursorLine = terminalBody.lastElementChild;
+      if (cursorLine && cursorLine.querySelector('.terminal-cursor')) {
+        terminalBody.removeChild(cursorLine);
+      }
+
+      const line = document.createElement('div');
+      line.className = `terminal-line ${type}`;
+      
+      const time = new Date().toISOString().substring(11, 19);
+      line.innerHTML = `[${time}] ${text}`;
+      
+      terminalBody.appendChild(line);
+      
+      // append cursor back
+      const newCursorLine = document.createElement('div');
+      newCursorLine.innerHTML = `<span class="terminal-prompt">$</span> <span class="terminal-cursor" id="cursor"></span>`;
+      terminalBody.appendChild(newCursorLine);
+      
+      terminalBody.scrollTop = terminalBody.scrollHeight;
+    }
+
+    function updateStats(isHit) {
+      metrics.requests += 1;
+      if (isHit) {
+        metrics.hits += 1;
+        // Assume each request costs ~2400 credits (e.g. 2400 input tokens)
+        metrics.credits += 2400;
+        metrics.savings += 0.048; // $0.048 saved per hit
+      }
+      
+      const hitrate = (metrics.hits / metrics.requests) * 100;
+      
+      // Update values with highlights
+      statRequests.innerText = metrics.requests;
+      statRequests.classList.add('changed');
+      
+      statHitRate.innerText = hitrate.toFixed(1) + '%';
+      statHitRate.classList.add('changed');
+      
+      statCredits.innerText = metrics.credits.toLocaleString();
+      statCredits.classList.add('changed');
+      
+      statSavings.innerText = '$' + metrics.savings.toFixed(3);
+      statSavings.classList.add('changed');
+      
+      setTimeout(() => {
+        statRequests.classList.remove('changed');
+        statHitRate.classList.remove('changed');
+        statCredits.classList.remove('changed');
+        statSavings.classList.remove('changed');
+      }, 500);
+    }
+
+    btnMiss.addEventListener('click', () => {
+      btnMiss.disabled = true;
+      appendTerminal('POST /v1/chat/completions (model: gpt-4o, stream: false)', 'info');
+      appendTerminal('Cache miss - contacting upstream OpenAI provider...', 'warning');
+      
+      setTimeout(() => {
+        appendTerminal('Upstream response received. Latency: 1452ms. Response size: 840 tokens.', 'success');
+        appendTerminal('Cache stored with context hash: 98faee3190bbf12a', 'success');
+        updateStats(false);
+        
+        btnMiss.disabled = false;
+        btnHit.disabled = false;
+      }, 1500);
+    });
+
+    btnHit.addEventListener('click', () => {
+      btnHit.disabled = true;
+      appendTerminal('POST /v1/chat/completions (model: gpt-4o, stream: false)', 'info');
+      appendTerminal('Exact Cache Hit! Serving local cache key: 98faee3190bbf12a', 'success');
+      
+      setTimeout(() => {
+        appendTerminal('Relay response complete. Latency: 4ms. Saved: 1448ms.', 'success');
+        updateStats(true);
+        btnHit.disabled = false;
+      }, 250);
+    });
+
+    // Copy Code Block functionality
+    const copyBtn = document.getElementById('copy-btn');
+    const codeBlock = document.getElementById('code-block');
+
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(codeBlock.innerText);
+      copyBtn.innerText = 'Copied!';
+      setTimeout(() => {
+        copyBtn.innerText = 'Copy';
+      }, 2000);
+    });
+  </script>
+</body>
+</html>

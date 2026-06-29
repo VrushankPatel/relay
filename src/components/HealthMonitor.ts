@@ -3,7 +3,7 @@ import type { Configuration } from '../types/config.js';
 import type { CacheStatistics } from '../types/cache.js';
 import type { MetricsSummary } from '../types/metrics.js';
 
-export const SERVICE_VERSION = '1.0.0';
+export const SERVICE_VERSION = '2.2.0';
 
 export interface ComponentCheck {
   name: string;

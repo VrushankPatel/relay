@@ -6,7 +6,7 @@ services:
     # image: ghcr.io/VrushankPatel/relay:latest
     container_name: relay
     ports:
-      - "${RELAY_PORT:-8080}:8080"
+      - "${RELAY_PORT:-9879}:${RELAY_PORT:-9879}"
     env_file:
       - .env
     environment:

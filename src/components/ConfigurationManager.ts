@@ -1,10 +1,11 @@
 import fs from 'fs';
 import { Configuration } from '../types/config.js';
 import { createChildLogger } from '../utils/logger.js';
+import os from 'os';
 
 const DEFAULT_CONFIG: Configuration = {
   server: {
-    port: 8080,
+    port: 9879,
     host: '0.0.0.0',
     maxConcurrentRequests: 100,
     requestTimeoutMs: 5000,
@@ -75,7 +76,13 @@ export class ConfigurationManager implements IConfigurationManager {
   }
 
   async loadConfig(filePath?: string): Promise<Configuration> {
-    const path = filePath || process.env.CONFIG_PATH || 'config.yaml';
+    let path = filePath || process.env.CONFIG_PATH || 'config.yaml';
+    if (!filePath && !process.env.CONFIG_PATH && !fs.existsSync(path)) {
+      const globalPath = `${os.homedir()}/.relay/config.yaml`;
+      if (fs.existsSync(globalPath)) {
+        path = globalPath;
+      }
+    }
     this.configPath = path;
 
     try {
