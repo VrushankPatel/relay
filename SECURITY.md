@@ -24,6 +24,21 @@ If no secret is provided, Relay will automatically generate a cryptographically 
 
 OAuth device flow credentials (such as GitHub Copilot tokens) are similarly encrypted at rest using AES-256-GCM with a securely derived key (PBKDF2 SHA-256) and random IVs and salts. This prevents plain-text credential leaks.
 
+## Dashboard Authentication & Credential Isolation
+
+To prevent credential leaks and unauthorized access, the operational dashboard is protected:
+
+1. **Authentication Requirement**: Access to the `/dashboard` and `/diagnostics` endpoints is restricted. Operators must authenticate via an `Authorization: Bearer <key>` header or by passing the key in the query parameter (e.g. `?key=<key>` for browser visits).
+2. **Auto-Generated Admin Key**: If no `security.apiKey` is explicitly defined in `config.yaml`, Relay will automatically generate a cryptographically random admin key on first run. This key is securely saved at `~/.relay/admin_api_key` with strict file permissions (`0600`) and logged once at startup. If no key is set or generated, the server refuses to serve the dashboard.
+3. **Data Redaction (Allowlisting)**: The HTML generator only receives an allowlisted view of configuration metadata (e.g. if encryption is active or if secrets are auto-generated). Raw configuration properties, such as provider API keys or base URLs, are strictly omitted from the payload and can never leak.
+
+### Verifying Your Deployment
+
+To verify your deployment is secure:
+1. Try accessing `http://localhost:8080/dashboard` in a browser without any credentials. It must return a `401 Unauthorized` response.
+2. Verify that `~/.relay/admin_api_key` is present and has restricted file permissions (only readable by the owner).
+3. If running in production, explicitly define `security.apiKey` in `config.yaml` to override the auto-generated key with your organization's managed secret.
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in Relay, please DO NOT open a public issue. Instead, send a private vulnerability report via GitHub Security Advisories or contact the maintainers directly.

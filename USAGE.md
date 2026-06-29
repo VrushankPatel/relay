@@ -214,6 +214,72 @@ gemini --api-key="your-relay-api-key" "Explain quantum computing in three senten
 > [!WARNING]
 > **OAuth Caveat:** Gemini CLI redirection only functions when configured with a direct **Gemini API Key** (Google AI Studio). Redirection does **NOT** work in OAuth/free-tier user login mode, as those library calls are bound to specific Google services endpoints.
 
+## CLI Lifecycle Management
+
+Relay includes a native command-line interface for managing the background daemon, checking system diagnostics, and inspecting logs.
+
+### Subcommands
+
+#### 1. `relay start [--daemon | -d]`
+Starts the Relay proxy server. By default, it runs in the foreground, logging directly to stdout.
+
+* **Foreground (Default):**
+  ```bash
+  relay start
+  ```
+* **Background Daemon Mode:**
+  ```bash
+  relay start --daemon
+  # or
+  relay start -d
+  ```
+  In daemon mode, Relay runs in the background, writes its process ID to `~/.relay/relay.pid`, and redirects logs to `~/.relay/relay.log`.
+
+#### 2. `relay stop`
+Gracefully shuts down a background daemon instance. It reads the PID file, confirms the target process is actually Relay (to prevent stale PID reuse conflicts), triggers a clean exit, and cleans up the PID file.
+```bash
+relay stop
+# Output:
+# Stopping Relay daemon (PID: 12345)...
+# ✅ Relay daemon stopped.
+```
+
+#### 3. `relay status`
+Reports the operational status of the Relay proxy, including uptime, daemon PID, active provider, lifetime cache hit rate, dashboard accessibility, and whether secrets are running on auto-generated configurations.
+```bash
+relay status
+# Output:
+# Status: RUNNING
+# Uptime: 3450 seconds
+# PID: 12345
+# Current Provider: generic
+# Cache Hit Rate: 42.5%
+# Dashboard Reachable: Yes
+# RELAY_CACHE_SECRET: auto-generated
+# Admin API Key: explicit
+```
+
+#### 4. `relay doctor`
+Runs diagnostic checks to verify configuration loading, state directory write permissions, and network resolution connectivity to the configured provider endpoint.
+```bash
+relay doctor
+# Output:
+# 🩺 Running Relay Sanity Diagnostics...
+#   [PASS] Configuration file loaded and validated successfully.
+#   [PASS] State directory (~/.relay) is writable.
+#   [PASS] Network connectivity: Resolved hostname api.openai.com successfully.
+#   [WARN] RELAY_CACHE_SECRET is auto-generated. Review before production use.
+#   [PASS] Admin API Key is explicitly configured.
+# 
+# ✅ All diagnostics passed successfully.
+```
+
+#### 5. `relay logs`
+Tails the background log output of a running daemonized instance in real time (equivalent to `tail -f`).
+```bash
+relay logs
+```
+
 ---
 
 ## Compatibility Matrix

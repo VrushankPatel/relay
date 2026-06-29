@@ -116,7 +116,13 @@ If you prefer running natively without Docker, you can configure and build the a
    ```
 3. Start the proxy:
    ```bash
+   # Foreground mode (default)
+   relay start
+   # or
    npm start
+
+   # Daemon mode (run in the background)
+   relay start --daemon
    ```
 
 ## Live Dashboard

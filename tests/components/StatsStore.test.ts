@@ -7,17 +7,28 @@ import os from 'os';
 describe('StatsStore', () => {
   const tempDir = path.join(os.tmpdir(), `relay-test-stats-${Date.now()}`);
   const statsFile = path.join(tempDir, 'stats.json');
+  let activeStores: StatsStore[] = [];
+
+  const createStore = () => {
+    const store = new StatsStore(statsFile);
+    activeStores.push(store);
+    return store;
+  };
 
   beforeEach(async () => {
+    activeStores = [];
     await fs.mkdir(tempDir, { recursive: true });
   });
 
   afterEach(async () => {
+    for (const store of activeStores) {
+      await store.destroy();
+    }
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   it('initializes gracefully when no file exists', async () => {
-    const store = new StatsStore(statsFile);
+    const store = createStore();
     await store.initialize();
     
     const stats = store.getStats();
@@ -26,7 +37,7 @@ describe('StatsStore', () => {
   });
 
   it('records stats and persists across simulated restarts', async () => {
-    const store1 = new StatsStore(statsFile);
+    const store1 = createStore();
     await store1.initialize();
     
     store1.recordCacheMiss('openai', 0.05, true);
@@ -36,7 +47,7 @@ describe('StatsStore', () => {
     // Give it a moment to save since it's async
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    const store2 = new StatsStore(statsFile);
+    const store2 = createStore();
     await store2.initialize();
     
     const stats = store2.getStats();
@@ -86,7 +97,7 @@ describe('StatsStore', () => {
     
     await fs.writeFile(statsFile, JSON.stringify(initialData), 'utf-8');
     
-    const store = new StatsStore(statsFile);
+    const store = createStore();
     await store.initialize(); // Doesn't prune yet, prunes on save
     
     // Trigger save
@@ -104,11 +115,36 @@ describe('StatsStore', () => {
   it('recovers gracefully from a corrupted file', async () => {
     await fs.writeFile(statsFile, '{ invalid json', 'utf-8');
     
-    const store = new StatsStore(statsFile);
+    const store = createStore();
     // Should not throw
     await store.initialize();
     
     const stats = store.getStats();
     expect(stats.lifetime.totalRequestsProxied).toBe(0);
+  });
+
+  it('records both cache hits and misses in daily rollups with correct request count and cost saved', async () => {
+    const store = createStore();
+    await store.initialize();
+    
+    // Miss: costs 0.05 actual spend (records 0 saved to rollup, but 1 request)
+    store.recordCacheMiss('openai', 0.05, false);
+    
+    // Hit: saves 0.05 spend (records 0.05 saved to rollup, and 1 request)
+    store.recordCacheHit('openai', false, 0.05, false);
+    
+    const stats = store.getStats();
+    expect(stats.lifetime.totalRequestsProxied).toBe(2);
+    expect(stats.lifetime.totalCacheMisses).toBe(1);
+    expect(stats.lifetime.totalExactCacheHits).toBe(1);
+    expect(stats.lifetime.totalDollarsSaved).toBeCloseTo(0.05);
+
+    const today = new Date().toISOString().split('T')[0];
+    const rollup = stats.dailyRollups['openai'][today];
+    expect(rollup).toBeDefined();
+    // 2 total requests in daily rollup (combined hits + misses)
+    expect(rollup.requests).toBe(2);
+    // 0.05 dollars saved in daily rollup (0.05 from hit, 0 from miss)
+    expect(rollup.cost).toBeCloseTo(0.05);
   });
 });

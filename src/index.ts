@@ -20,10 +20,287 @@ import { CompatibilityLayer } from './components/CompatibilityLayer.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawn, exec } from 'child_process';
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+function isRelayProcess(pid: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows
+      ? `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object -ExpandProperty CommandLine"`
+      : `ps -p ${pid} -o args=`;
+    
+    exec(cmd, (error, stdout) => {
+      if (error || !stdout) {
+        try {
+          process.kill(pid, 0);
+          resolve(true);
+        } catch (e) {
+          resolve(false);
+        }
+        return;
+      }
+      const commandLine = stdout.toLowerCase();
+      resolve(commandLine.includes('relay') || commandLine.includes('index.js') || commandLine.includes('index.ts') || commandLine.includes('node'));
+    });
+  });
+}
+
+async function stopCommand(): Promise<void> {
+  const statsDir = path.join(os.homedir(), '.relay');
+  const pidFile = path.join(statsDir, 'relay.pid');
+  
+  if (!fs.existsSync(pidFile)) {
+    console.log('No Relay daemon is running (no PID file found).');
+    process.exit(0);
+  }
+  
+  const pidStr = fs.readFileSync(pidFile, 'utf-8').trim();
+  const pid = parseInt(pidStr, 10);
+  
+  if (isNaN(pid)) {
+    console.log('Stale or invalid PID file found. Cleaning it up.');
+    try { fs.unlinkSync(pidFile); } catch (e) {}
+    process.exit(0);
+  }
+  
+  const active = await isRelayProcess(pid);
+  if (!active) {
+    console.log('Stale PID file found (process does not exist or is not Relay). Cleaning it up.');
+    try { fs.unlinkSync(pidFile); } catch (e) {}
+    process.exit(0);
+  }
+  
+  console.log(`Stopping Relay daemon (PID: ${pid})...`);
+  try {
+    process.kill(pid, 'SIGTERM');
+    
+    let exited = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 200));
+      const stillActive = await isRelayProcess(pid);
+      if (!stillActive) {
+        exited = true;
+        break;
+      }
+    }
+    
+    if (!exited) {
+      console.log('Process did not exit gracefully. Force stopping...');
+      try { process.kill(pid, 'SIGKILL'); } catch (e) {}
+    }
+    
+    console.log('✅ Relay daemon stopped.');
+  } catch (err: any) {
+    console.error(`Failed to stop process ${pid}: ${err.message}`);
+  } finally {
+    try { fs.unlinkSync(pidFile); } catch (e) {}
+  }
+  process.exit(0);
+}
+
+async function statusCommand(): Promise<void> {
+  const { ConfigurationManager } = await import('./components/ConfigurationManager.js');
+  
+  const configManager = new ConfigurationManager();
+  const config = await configManager.loadConfig();
+  const port = config.server.port || 8080;
+  
+  const statsDir = path.join(os.homedir(), '.relay');
+  const pidFile = path.join(statsDir, 'relay.pid');
+  
+  let daemonPid: number | null = null;
+  let isDaemonActive = false;
+  
+  if (fs.existsSync(pidFile)) {
+    const pidStr = fs.readFileSync(pidFile, 'utf-8').trim();
+    daemonPid = parseInt(pidStr, 10);
+    if (!isNaN(daemonPid)) {
+      isDaemonActive = await isRelayProcess(daemonPid);
+    }
+  }
+  
+  const checkHealth = (): Promise<any> => {
+    return new Promise((resolve) => {
+      const req = http.get(`http://localhost:${port}/health`, { timeout: 1000 }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            resolve(null);
+          }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.end();
+    });
+  };
+
+  const health = await checkHealth();
+  
+  if (!health) {
+    if (isDaemonActive) {
+      console.log(`Relay daemon is running in background (PID: ${daemonPid}) but the API server is unresponsive on port ${port}.`);
+      process.exit(1);
+    } else {
+      console.log('Relay is not running.');
+      process.exit(1);
+    }
+  }
+  
+  let hitRate = 0;
+  const statsPath = path.join(statsDir, 'stats.json');
+  if (fs.existsSync(statsPath)) {
+    try {
+      const stats = JSON.parse(fs.readFileSync(statsPath, 'utf-8'));
+      const total = stats.lifetime?.totalRequestsProxied || 0;
+      const hits = (stats.lifetime?.totalExactCacheHits || 0) + (stats.lifetime?.totalFuzzyCacheHits || 0);
+      hitRate = total > 0 ? (hits / total) * 100 : 0;
+    } catch (e) {}
+  }
+  
+  const isDashboardReachable = await new Promise<boolean>((resolve) => {
+    const req = http.get(`http://localhost:${port}/dashboard`, { timeout: 1000 }, (res) => {
+      resolve(res.statusCode === 200 || res.statusCode === 401);
+    });
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+  
+  const cacheSecretVal = process.env.RELAY_CACHE_SECRET ? 'explicit' : 'auto-generated';
+  const adminApiKeyVal = config.security?.apiKey ? 'explicit' : 'auto-generated';
+  
+  console.log('Status: \x1b[32mRUNNING\x1b[0m');
+  console.log(`Uptime: ${health.uptime} seconds`);
+  console.log(`PID: ${daemonPid || 'N/A (started in foreground)'}`);
+  console.log(`Current Provider: ${health.relay?.provider || config.provider?.type || 'generic'}`);
+  console.log(`Cache Hit Rate: ${hitRate.toFixed(1)}%`);
+  console.log(`Dashboard Reachable: ${isDashboardReachable ? 'Yes' : 'No'}`);
+  console.log(`RELAY_CACHE_SECRET: ${health.relay?.cacheSecretType || cacheSecretVal}`);
+  console.log(`Admin API Key: ${health.relay?.adminApiKeyType || adminApiKeyVal}`);
+  process.exit(0);
+}
+
+async function doctorCommand(): Promise<void> {
+  const dns = await import('dns/promises');
+  const { ConfigurationManager } = await import('./components/ConfigurationManager.js');
+  const { createProvider } = await import('./providers/index.js');
+  
+  console.log('🩺 Running Relay Sanity Diagnostics...');
+  let failed = false;
+  
+  try {
+    const configManager = new ConfigurationManager();
+    const config = await configManager.loadConfig();
+    console.log('  [PASS] Configuration file loaded and validated successfully.');
+    
+    const statsDir = path.join(os.homedir(), '.relay');
+    try {
+      fs.mkdirSync(statsDir, { recursive: true });
+      const testFile = path.join(statsDir, '.doctor_write_test');
+      fs.writeFileSync(testFile, 'test', 'utf-8');
+      fs.unlinkSync(testFile);
+      console.log('  [PASS] State directory (~/.relay) is writable.');
+    } catch (err: any) {
+      console.log(`  [FAIL] State directory (~/.relay) is NOT writable: ${err.message}`);
+      failed = true;
+    }
+    
+    if (config.provider) {
+      try {
+        const provider = createProvider(config.provider);
+        const endpoint = provider.getEndpointUrl();
+        const url = new URL(endpoint);
+        
+        await dns.lookup(url.hostname);
+        console.log(`  [PASS] Network connectivity: Resolved hostname ${url.hostname} successfully.`);
+      } catch (err: any) {
+        console.log(`  [FAIL] Network connectivity: Failed to resolve hostname for provider: ${err.message}`);
+        failed = true;
+      }
+    } else {
+      console.log('  [FAIL] No provider configured in config.yaml.');
+      failed = true;
+    }
+    
+    const cacheSecretType = process.env.RELAY_CACHE_SECRET ? 'explicit' : 'auto-generated';
+    const adminApiKeyType = config.security?.apiKey ? 'explicit' : 'auto-generated';
+    
+    if (cacheSecretType === 'auto-generated') {
+      console.log('  [WARN] RELAY_CACHE_SECRET is auto-generated. Review before production use.');
+    } else {
+      console.log('  [PASS] RELAY_CACHE_SECRET is explicitly configured.');
+    }
+    
+    if (adminApiKeyType === 'auto-generated') {
+      console.log('  [WARN] Admin API Key is auto-generated. Review before production use.');
+    } else {
+      console.log('  [PASS] Admin API Key is explicitly configured.');
+    }
+    
+  } catch (err: any) {
+    console.log(`  [FAIL] Configuration failed to load: ${err.message}`);
+    failed = true;
+  }
+  
+  if (failed) {
+    console.log('\n❌ Doctor diagnostics failed. Check configuration and permissions.');
+    process.exit(1);
+  } else {
+    console.log('\n✅ All diagnostics passed successfully.');
+    process.exit(0);
+  }
+}
+
+async function logsCommand(): Promise<void> {
+  const logFile = path.join(os.homedir(), '.relay', 'relay.log');
+  
+  if (!fs.existsSync(logFile)) {
+    console.error('No daemon log file found. Ensure Relay is running in daemon mode.');
+    process.exit(1);
+  }
+  
+  const stats = fs.statSync(logFile);
+  let size = stats.size;
+  const start = Math.max(0, size - 10000); // read last 10KB
+  
+  const stream = fs.createReadStream(logFile, { start, encoding: 'utf-8' });
+  stream.on('data', (chunk) => {
+    process.stdout.write(chunk);
+  });
+  
+  stream.on('end', () => {
+    let currentSize = size;
+    const interval = setInterval(() => {
+      if (!fs.existsSync(logFile)) {
+        clearInterval(interval);
+        return;
+      }
+      const newStats = fs.statSync(logFile);
+      if (newStats.size > currentSize) {
+        const newStream = fs.createReadStream(logFile, {
+          start: currentSize,
+          end: newStats.size - 1,
+          encoding: 'utf-8'
+        });
+        newStream.on('data', (chunk) => {
+          process.stdout.write(chunk);
+        });
+        currentSize = newStats.size;
+      }
+    }, 500);
+    
+    process.on('SIGINT', () => {
+      clearInterval(interval);
+      process.exit(0);
+    });
+  });
 }
 
 async function main(): Promise<void> {
@@ -61,7 +338,53 @@ async function main(): Promise<void> {
       }
     }
     process.exit(0);
+  } else if (command === 'stop') {
+    await stopCommand();
+  } else if (command === 'status') {
+    await statusCommand();
+  } else if (command === 'doctor') {
+    await doctorCommand();
+  } else if (command === 'logs') {
+    await logsCommand();
   } else if (!command || command === 'start') {
+    const isDaemon = process.argv.includes('--daemon') || process.argv.includes('-d');
+    if (isDaemon) {
+      const statsDir = path.join(os.homedir(), '.relay');
+      fs.mkdirSync(statsDir, { recursive: true });
+      
+      const pidFile = path.join(statsDir, 'relay.pid');
+      const logFile = path.join(statsDir, 'relay.log');
+      
+      const out = fs.openSync(logFile, 'a');
+      const err = fs.openSync(logFile, 'a');
+      
+      // Filter out the daemon flags
+      const args = process.argv.slice(2).filter(arg => arg !== '--daemon' && arg !== '-d');
+      if (!args.includes('start')) {
+        args.unshift('start');
+      }
+      
+      const isPkg = (process as any).pkg !== undefined;
+      const spawnCmd = process.argv[0];
+      const spawnArgs = isPkg ? args : [process.argv[1], ...args];
+      
+      const child = spawn(spawnCmd, spawnArgs, {
+        detached: true,
+        stdio: ['ignore', out, err]
+      });
+      
+      if (child.pid !== undefined) {
+        fs.writeFileSync(pidFile, child.pid.toString(), 'utf-8');
+      }
+      child.unref();
+      
+      console.log(`🚀 Relay starting in background (daemon mode)...`);
+      console.log(`   PID: ${child.pid !== undefined ? child.pid : 'N/A'}`);
+      console.log(`   Logs: ${logFile}`);
+      console.log(`   PID File: ${pidFile}`);
+      process.exit(0);
+    }
+
     const configManager = new ConfigurationManager();
     const config = await configManager.loadConfig();
 
@@ -118,6 +441,32 @@ async function main(): Promise<void> {
     const statsStore = new StatsStore(path.join(os.homedir(), '.relay', 'stats.json'));
     await statsStore.initialize();
 
+    // 2.6 Initialize Admin API Key for security
+    let adminApiKey = config.security?.apiKey;
+
+    if (!adminApiKey) {
+      const crypto = await import('crypto');
+      const fsPromise = await import('fs/promises');
+      const statsDir = path.dirname(path.join(os.homedir(), '.relay', 'stats.json'));
+      await fsPromise.mkdir(statsDir, { recursive: true });
+      const adminKeyPath = path.join(statsDir, 'admin_api_key');
+      
+      try {
+        if (fs.existsSync(adminKeyPath)) {
+          adminApiKey = (await fsPromise.readFile(adminKeyPath, 'utf-8')).trim();
+        } else {
+          adminApiKey = crypto.randomBytes(16).toString('hex');
+          await fsPromise.writeFile(adminKeyPath, adminApiKey, { mode: 0o600 });
+        }
+      } catch (err: any) {
+        logger.error({ error: err.message }, 'Failed to load/generate auto-generated admin API key');
+      }
+
+      if (adminApiKey) {
+        logger.warn(`No security.apiKey configured. Generated persistent admin API key for dashboard: ${adminApiKey}`);
+      }
+    }
+
     // 3. Setup Health Monitoring
     healthMonitor.registerComponent('CacheManager', async () => {
       cacheManager.getStatistics();
@@ -138,6 +487,12 @@ async function main(): Promise<void> {
         status: health.healthy ? 'healthy' : 'degraded',
         uptime: health.uptime,
         components: Object.fromEntries(health.components),
+        relay: {
+          version: SERVICE_VERSION,
+          provider: config.provider?.type || 'generic',
+          cacheSecretType: process.env.RELAY_CACHE_SECRET ? 'explicit' : 'auto-generated',
+          adminApiKeyType: config.security?.apiKey ? 'explicit' : 'auto-generated'
+        }
       });
     });
 
@@ -156,14 +511,27 @@ async function main(): Promise<void> {
     });
 
     const checkAdminAuth = (req: http.IncomingMessage, res: http.ServerResponse): boolean => {
-      if (config.security?.apiKey) {
+      const targetKey = config.security?.apiKey || adminApiKey;
+      if (targetKey) {
         const authHeader = req.headers['authorization'] || '';
-        const token = authHeader.replace(/^Bearer\s+/i, '');
-        if (token !== config.security.apiKey) {
+        let token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        
+        if (!token && req.url) {
+          try {
+            const parsedUrl = new URL(req.url, 'http://localhost');
+            token = (parsedUrl.searchParams.get('key') || '').trim();
+          } catch (e) {}
+        }
+        
+        if (token !== targetKey) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Unauthorized', code: 'UNAUTHORIZED' }));
           return false;
         }
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal Server Error', message: 'No admin API key configured or generated' }));
+        return false;
       }
       return true;
     };

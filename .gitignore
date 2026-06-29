@@ -55,3 +55,10 @@ temp/
 
 # Binaries
 bin/
+
+# Scratch and throwaway debug scripts
+test-*.js
+test-*.ts
+debug-*.js
+debug-*.ts
+scratch/

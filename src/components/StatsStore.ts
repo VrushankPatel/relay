@@ -133,10 +133,12 @@ export class StatsStore {
       this.data.lifetime.nonStreamingRequests++;
     }
 
+    this.recordDaily(providerId, costSaved, 1);
+
     this.scheduleSave();
   }
 
-  recordCacheMiss(providerId: string, cost: number, isStreaming: boolean) {
+  recordCacheMiss(providerId: string, _cost: number, isStreaming: boolean) {
     this.initProvider(providerId);
     
     this.data.lifetime.totalRequestsProxied++;
@@ -144,7 +146,7 @@ export class StatsStore {
     this.data.providers[providerId].requestsProxied++;
     this.data.providers[providerId].cacheMisses++;
     
-    this.recordDaily(providerId, cost, 1);
+    this.recordDaily(providerId, 0, 1);
     
     if (isStreaming) {
       this.data.lifetime.streamingRequests++;
@@ -214,5 +216,11 @@ export class StatsStore {
   getStats(): StatsData {
     // Return a deep copy to prevent mutation
     return JSON.parse(JSON.stringify(this.data));
+  }
+
+  async destroy() {
+    while (this.isWriting) {
+      await new Promise(r => setTimeout(r, 5));
+    }
   }
 }

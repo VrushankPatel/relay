@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.2.0] - 2026-06-29
+
+### Security (Critical Fix)
+- **Dashboard Credential Exposure Fix**: Resolved a critical security issue where the raw `Configuration` object was being serialized and exposed in the embedded JSON of the `/dashboard` HTML template. This was exposing sensitive credentials such as upstream provider API keys (`config.provider.apiKey`) and admin credentials. Config details are now isolated and only a minimal, allowlisted metadata view is shared.
+- **Enforced Dashboard Authentication**: Fixed a vulnerability where setting up Relay without an explicit `security.apiKey` left the admin dashboard completely open and unauthenticated. Relay now automatically generates and persists a cryptographically secure 16-byte admin API key at `~/.relay/admin_api_key` with strict user-only read/write permissions (`0600`) and logs it at startup. Query parameter authentication (`?key=...`) has been added for seamless browser visits.
+
+### Added
+- **Lifecycle Management CLI**: Integrated subcommands into the CLI binary for complete service management:
+  - `start [--daemon | -d]`: Starts the proxy (foreground by default, or backgrounded as a detached daemon).
+  - `stop`: Gracefully terminates a background daemon instance after validating the target process's identity to prevent PID reuse conflicts.
+  - `status`: Queries uptime, daemon process state, active provider, cache hit ratios, and key config types.
+  - `doctor`: Runs diagnostic checks on configuration validity, directory write permissions, and upstream DNS/network connectivity.
+  - `logs`: Tails background log output in real time.
+- **Combined Daily Rollup Request Accounting**: Updated daily rollups to count both cache hits and misses, ensuring the 30-day savings activity graph correctly reports total proxy traffic while mapping cost relative to actual dollars saved.
+
 ## [2.1.0] - 2026-06-28
 
 ### Added
